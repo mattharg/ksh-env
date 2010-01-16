@@ -1,0 +1,716 @@
+#!/bin/ksh -p
+##set -x; 
+##TRACE_ALL_FNS="set -x ";
+
+#File        : $HOME/.batch.defns
+#Title       : Batch Definitions file to be sourced when you run batch jobs.
+#Description : Provides facilities to define and manage the running of a
+#              a run              comprising many
+#                 suits      each comprising many
+#                   jobs     All the jobs in a suit, run concurrently (in the bg).
+#                                -- and/or --
+#                 jcl        each comprising many
+#                   jobs     All the jobs in a jcl, run consecutively, and will restart at the
+#                            failed job, if ran subsequently.
+#
+#                 NB: Each suit waits for (all the jobs of) the previous suit to complete
+#                 prior to commencing unless the -bg flag is used.
+#              Provides JCL (step)restart logic;
+#              Provides automatic STDERR monitoring;
+#              Collates all activity to one centralised logfile and provides a viewer
+#              Provides run statistics
+#              Provides alert notification using syslog or email 
+#Author      : Matthew S. Hargreaves
+#Usage       : '.' $HOME/.batch.defns; Plus also see fn 'batch_usage'  re. env.var. config.
+#
+#
+# IDEAS  :  
+#           o 
+#           o 
+#           o 
+#           o Introduce JOB MANAGEMENT, alla
+#              o list   : current job status : started, running, stopped, aborted, waiting
+#              o manage : stop, resume, renice, CPU consumed, ....
+#
+#           o Alert Reporting of jobs - setup system to use syslog, snmp, script(mail)...
+#             o Collect all lines that would be written to STDERR, 
+#               and put in a single mail item to `logname`
+#             o Possibility use syslog each time we write STDERR....
+#             o CONFIGURE syslog with env.var.s prior to '.' this (have defaults of course)
+#           o 
+#           o S T O P    P O L U T I N G    the name-space - use _BATCH_......
+#           o ability to monitor which multi's and which jobs are running. USING sigs traps
+#           o Detect the jobs that can be ran using notes below..
+#           o Have a CENTRAL TRACE FILE as well as the CENTRAL LOG FILE, and have auto-skulk
+#             NB:Do have seperate induvidual STDOUT trace files for each job already.
+#           o Auto-skulk the CENTRAL_LOG_FILE
+#             o take from ae1.... (awk or perl)
+#           o introduce aging of files (from OLD batch)...
+#           o 
+#           o 
+#           o 
+# PROBS  :  -
+#           - 
+#
+# FUNCTIONS
+#              check_user()      Check that the uid is $1
+#              check_RT()        Check the last $?==$RT and perform action
+#              clean_up()        The fn called on exiting
+#              seconds_since()   time calculation fn used for stat's
+#              kshtime2hmsms()   time calculation fn used for stat's
+#              secs2hms()        time calculation fn used for stat's
+#              give_error_code()  
+#              give_run_stats()  provide (report) the statistics for the run
+#              get_next_INC()    Get the *incremental* number for this 'run'
+#              log_file()        Use this ($1) filename as the logfile
+#              space_log_file()  Put some spaces into the logfile
+#              log_it()          Global fn used to write to the audit logfile 
+#              start_viewer()    Start a X-viewer (xterm)
+#              run_suit()        Fn to run a suit of fns
+#              	monitor_stderr() Monitor the STDERR of a fn
+#              		minimon()      Actually monitoring the STDERR
+#              test_run_suit()   The Regression test fn
+#              batch_usage()     The 'help'/'usage' fn.  ie. how to use...
+#              batch_checks()    The overall environmental checks before proceding....
+RELEASE="1.00";
+# $Id: .batch.defns,v 1.17 1998/09/16 04:14:38 mhargrea Exp $
+# %W%       %G%
+SCCS_WHAT="%W%       %G%";
+RCS_VER="$Revision: 1.17 $";
+
+# c o n f i g u r a t i o n 
+#TEST=
+TEST="echo";
+	BATCH_HOME="${BATCH_HOME:-$HOME/batch}";  # This is where the CENTRAL LOG FILE lives
+	BATCH_TMP="${BATCH_TMP:-/tmp}";           # This is where the tmp files are kept...
+	BATCH_LOG="${BATCH_LOG:-$BATCH_HOME/log}";# stdout stderr status log files are kept...
+	BATCH_TIMINGS=${BATCH_TIMINGS:-time};     # cmmd to use to time the jobs
+#  A u t o    E x p o r t    E n v   V a r s 
+set -a;
+
+# s t d    n a m e s 
+SCCS_VER="%I%";
+ME=${0##*/};
+LONG_ME="$ME-$RCS_VER";
+FULLPATH=$(whence $0);
+HERE=${FULLPATH%/*};
+LOG="$HOME/logs/$ME.log";
+SHORT_DATE="`date '+%a%d%b.%H.%M.%S'`";
+DATE="$SHORT_DATE";
+HOSTNAME="`hostname`";
+LOGSTR="$LOGNAME: $DATE ($HOSTNAME) -";
+TMP="/tmp/$ME.$DATE.$$";
+##WHOAMI=`id -un`;  #AIX
+WHOAMI=`whoami`;    #solaris
+PROG_LOGNAME=`logname`;
+HON=$(tput smso);
+HOFF=$(tput rmso);
+
+TMP_ERRCODE_PREAMBLE="$BATCH_LOG/errcode";      #Holds the $? errcode of the run
+    TMP_OUT_PREAMBLE="$BATCH_LOG/outtrace";     #Holds the STDOUT trace of the run...
+   TMP_STAT_PREAMBLE="$BATCH_LOG/statreport";   #Holds the status report of the job.
+ TMP_JOBPID_PREAMBLE="$BATCH_LOG/jobpid";       #Holds the PID of the job.
+# Std Names for the xterm ps
+  if [ -x /usr/dt/bin/dtterm ] ; then
+	XTERM_SHORT="dtterm";
+	XTERM_LONG="/usr/dt/bin/$XTERM_SHORT";
+elif [ -x /usr/openwin/bin/xterm ] ; then
+	XTERM_SHORT="xterm";
+	XTERM_LONG="/usr/openwin/bin/$XTERM_SHORT";
+else
+	XTERM_SHORT=":";
+	XTERM_LONG="(echo 'NO_XTERM_AVAILABLE')";
+	print "NOTICE: No xterm is available.....";
+fi
+
+let RT="0";   #General return value holder alla C's ....
+
+# t r a p s   
+#trap command ERR    # whenever non-zero value
+#trap command DEBUG  # after every command
+trap clean_up EXIT   # (0) always on exiting(define in a fn for exiting that fn)
+#trap command INT    # the interupt key (^C)
+#trap "exec > /dev/null; exec 2>/dev/null " 13  # (13=) pipe output ner.
+
+# L o c a l    f u n c t i o n s 
+
+#
+#
+#  C E N T R A L I S E D   L o g g i n g 
+#
+CENTRAL_LOG_FILE="${CENTRAL_LOG_FILE:-$BATCH_HOME/CENTRAL.LOG.FILE}";
+exec 9>>$CENTRAL_LOG_FILE;
+log_file() {
+	FULL_DATE="`date '+%a %d %b %H:%M:%S'`";    
+	LOGSTR="$FULL_DATE ($HOSTNAME) $WHOAMI ($PROG_LOGNAME):"
+##	print "$LOGSTR $*" >> $CENTRAL_LOG_FILE;
+	print -u9 "$LOGSTR $*";
+}
+
+space_log_file() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+	print -u9 "\n";
+}
+
+log_it() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+##set -x
+	if [ ".$1." = ".-t." ] ; then  # NB Needs the "." for when run.rr >/dev/null
+		shift; 
+		PREV="$1"; shift
+		ELAPSED=$(seconds_since $PREV);
+		JOB_DURATION[$JOB_NUMB]="$ELAPSED";
+		STRING="$* Duration=$ELAPSED secs" ;
+	else
+		STRING="$*";
+	fi
+
+	log_file "$STRING"; 
+	print    "$STRING";
+}
+
+clean_up() { $TRACE_ALL_FNS; #set -x; #This fn..
+#
+# This function is 'trap'd to EXIT so is the very last thing that runs.
+#
+
+	RET_VALUE=$1
+
+# a n n o u n c e 
+if [ "$BATCH_STAT" -eq 0 ] ; then
+	log_it "[$INC_NNN]       Waiting for All jobs for this run to terminate."; 
+	wait $ALL_RUN_PIDS;
+	log_it "[$INC_NNN]       All jobs have terminated for this run."; 
+	give_run_stats;
+	log_it "[$INC_NNN]       $ME:Release $RELEASE ($RCS_VER) Completed Successfully"; 
+	space_log_file;
+fi
+
+	exec 9>&-;   #Close the CENTRAL.LOG.FILE file descriptor....
+
+	/bin/rm -f $TMP* 2>/dev/null;
+	print "$ME:Release $RELEASE ($RCS_VER) cleaned up OK.";
+	exit $RET_VALUE;
+}
+
+check_user() { $TRACE_ALL_FNS; #set -x; #This fn ...
+	if [ "$WHOAMI" != "$1" ] ; then
+		print "$ME rel. $RELEASE ($RCS_VER) must run as user $1.   Terminating.."
+		exit 99
+	fi
+}
+
+check_RT() { $TRACE_ALL_FNS; #set -x;  #This fn
+	if  [ "$RT" -ne 0 ] ; then
+		get_LOGSTR; print "$LOGSTR Returned $RT" | tee -a $LOG >&2;
+		if [ ! -z "$*" ] ; then
+			print "$LOGSTR $*" | tee -a $LOG >&2;
+		fi
+		clean_up $RT;
+	fi
+}
+#
+#  T i m i n g   T h i n g s 
+#
+#
+SECONDS=0;   # NB SECONDS is a ksh internal that returns a clock value
+seconds_since() {  # Usage seconds_since previous_value, eg. seconds_since 1112
+# NB This gets called from within 'eval's, for delayed (lazy)
+#    evaluation of the ENV VAR $SECONDS. which is what we want.
+##set -x
+	typeset -i PREVIOUS_SECS="$1";
+	typeset -i SECONDS_SINCE="$SECONDS - $PREVIOUS_SECS";
+	print  $SECONDS_SINCE;
+	return $SECONDS_SINCE;  # should '##' this.
+}
+
+
+kshtime2hmsms() { $TRACE_ALL_FNS; #set -x;  # This fn ....
+	kshtime="$1";                                          # Eg. 12h12m23.76s
+##	typeset -i   MS; typeset -Z2        MS;   MS=${kshtime#*m+([0-9]).%s};  # ORIG before failing
+##	SECS=${kshtime#*m%.??s}; 
+##	MINS=${kshtime%m*#*h};
+
+
+	MS_STR=${kshtime%s};        MS_STR=${MS_STR#*m*.}; typeset -i   MS; typeset -Z2    MS=$MS_STR;
+	SECS_STR=${kshtime%.??s}; SECS_STR=${SECS_STR#*m}; typeset -i SECS; typeset -Z2  SECS=$SECS_STR;      
+	MINS_STR=${kshtime#*h};   MINS_STR=${MINS_STR%m*}; typeset -i MINS; typeset -Z2  MINS=$MINS_STR;      
+
+                                                     typeset -i  HRS; typeset -Z2   HRS; 
+
+	HOURS=${kshtime%h}; if [ "$HOURS" != "$kshtime" ] ; then HRS="$HOURS";  else HRS="00"; fi;
+
+##	print "$HRS:$MINS:$SECS:$MS";
+	print "$HRS:$MINS:$SECS";
+}
+
+secs2hms() { $TRACE_ALL_FNS; #set -x;    # This fns....
+##set -x
+	typeset -i                   SECS="$1";
+	typeset -i _S; typeset -Z2     _S=$(($SECS % 60));
+	typeset -i                   MINS=$(($SECS / 60));
+	typeset -i _H; typeset -Z2     _H=$(($MINS / 60));
+	typeset -i _M; typeset -Z2     _M=$(($MINS % 60));
+	print "$_H:$_M:$_S";
+}
+
+#
+# D u m p s   a n d   R e p o r t i n g 
+#
+give_error_code() { $TRACE_ALL_FNS;  #set -x;   # This fn...
+	JOB="$1"; print ${ERROR_CODE[$JOB]};
+}
+
+give_run_stats() {	$TRACE_ALL_FNS;   #set -x;   $ This fn....
+	typeset -i NUMB_JOBS=$(($JOB_NUMB -1));
+	space_log_file;
+	log_it "[$INC_NNN]       Statistics For Run $INC_NNN. $JOB_NUMB jobs";
+	for statfile in $(ls $BATCH_LOG/statreport.$INC_NNN.* 2>/dev/null) ;  do
+		log_it "$(cat $statfile)"
+	done
+}
+
+#
+#    I n c r e m e n t a l     f i l e     n a m e s 
+#
+INC_STEP_FILE="$BATCH_HOME/.centralised.run.number.inc.file.num"
+get_next_INC() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+	OLD="`cat $INC_STEP_FILE`"  2>/dev/null
+	RT="$?"; check_RT "CANT OPEN INCREMENT FILE";
+	let INC="1 + $OLD"        2>/dev/null
+	if [ "$INC" = "999" ] ; then
+		let INC="0";
+	fi
+	INC_NNN=$(awk "END {printf \"%03d\n\", $INC}" </dev/null)
+	print "$INC" >$INC_STEP_FILE
+	RT="$?"; check_RT "CANT WRITE INCREMENT FILE";
+}
+
+
+start_viewer() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+##set -x
+#  !!!!! P R O B   T h i s  c a u s e s   w a i t    to wait..............
+#
+#  Should check to see if one is running before starting this.......
+#
+# PROB - what if more than one person wants to tail on the same host..... - check uid etc...
+	ONE_ALREADY=`ps -ef | grep "$XTERM_SHORT -geometry 150x60 -n LogFile" | grep -v grep`
+	if [ -z "$ONE_ALREADY" ] ; then
+		nohup $XTERM_LONG -geometry 150x60  -n 'LogFile' -title 'CENTRAL.LOG.FILE   tail'  -bg black -fg yellow -sb -sl 3000 -e tail -300f $CENTRAL_LOG_FILE   2>/dev/null >/dev/null &
+		sleep 2;
+	fi
+
+}
+
+ALL_RUN_PIDS="";  # nice and global
+typeset -i    SUBRUN_NUMB="0"; typeset -Z2 SUBRUN_NUMB="0";
+typeset -i       JOB_NUMB="0"; typeset -Z2    JOB_NUMB="0";
+#NOT_USED#	MONITOR_TERMINATE_INSTRUCTION="Please Terminate This Co-Process";
+	monitor_stderr() {   $TRACE_ALL_FNS;  #set -x ;    # This fn...
+#
+# This is my co-process (ACTUALLY THE FOREGROUND ONE - job is the BG
+#  PROB  It appears that it terminates (prematurely) for some reason.  
+#  PROB  What reason?
+#       I have tried setting -b and -m as above, this stops the termination, but also
+#       stop the running......
+#
+		JOB_SPEC="$1";    COP_PID="$2";
+
+		trap "print  -u9 '$JOB_SPEC STDERR ------- SIGNAL RECIEVED  . But which ONE? '; "  ERR HUP QUIT ILL TRAP ABRT EMT FPE KILL BUS SEGV SYS PIPE ALRM TERM CLD PWR WINCH URG POLL STOP TSTP CONT TTIN TTOU VTALRM PROF XCPU XFSZ WAITING LWP FREEZE THAW CANCEL RTMIN RTMIN+1 RTMIN+2 RTMIN+3 RTMAX-3 RTMAX-2 RTMAX-1 RTMAX 
+		trap exit USR1    # USR1 signal used to tell me to stop monitoring the log file.
+##		trap clean_up EXIT   # (0) always on exiting(define in a fn for exiting that fn)
+##		trap "log_it '$JOB_SPEC STDERR ------- EXITING . But why? '; return" EXIT  #works fine
+		trap "log_it '$JOB_SPEC STDERR ------- Received SIGUSR2 Instructed to complete'; minimon; return" USR2  
+		trap "log_it '$JOB_SPEC STDERR ------- Received SIGUSR1 Instructed to Terminate'; return" USR1
+		trap "log_it '$JOB_SPEC STDERR ------- Received SIGINT. Ignoring';" INT
+
+		minimon() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+##set -x
+			while read -p -r errline; 
+			do
+				case "$errline" in
+					    @(real)*[0-9]m*([0-9])[0-9].[0-9][0-9]s) CPU_REAL_TIME="${errline##real}";;
+					@(user|sys)*[0-9]m*([0-9])[0-9].[0-9][0-9]s) CPU_USSY_TIMES="$CPU_US_TIMES $errline";;
+					*)   if [ ! -z "$errline" ] ; then log_it "$JOB_SPEC STDERR- $errline"; fi ;;
+				esac
+
+			done
+			return $?
+		} # EOfn minimon
+
+		while minimon ; do
+			if [ ".$(ps -p $COP_PID >/dev/null 2>&1; echo $?)." == ".0." ] ; then
+##				log_it "$JOB_SPEC monitor-error-- $COP_PID still active, Re-starting";
+				sleep 1;
+			else 
+##				log_it "$JOB_SPEC monitor_error-- $COP_PID has terminated. Terminating ";
+				return; # NB exit exits the eval....
+			fi
+		done
+
+		log_it "$JOB_SPEC monitor_error -- read failed without EOF on mssgs. Aborting. ";
+
+	} # EOfn monitor_error
+
+
+
+batch_kickoff_eval_job() { $TRACE_ALL_FNS; #set -x; #This fn.
+#
+# Usage::   batch_kickoff_eval_job  fn_name
+#           Creates a new job,  kicks it off in the background, and returns the job number
+#           This id can be used to find the 1.pid or 2.return status, or wait on the job, or whatever....
+#
+		job="$*";   JOB_NUMB=$(( 1 + $JOB_NUMB ));   
+		JOB_ID="$INC_NNN.$SUBRUN_NUMB.$JOB_NUMB";
+		typeset -i  START_SECS[$JOB_NUMB]=$SECONDS;
+		export  TMP_ERRCODE_FILE="${TMP_ERRCODE_PREAMBLE}.$JOB_ID";      #Holds the $? errcode of the run
+		export      TMP_OUT_FILE="${TMP_OUT_PREAMBLE}.$JOB_ID";      #Holds the STDOUT trace of the run...
+		export     TMP_STAT_FILE="${TMP_STAT_PREAMBLE}.$JOB_ID";      #Holds the status report of the job.
+		export   TMP_JOBPID_FILE="${TMP_JOBPID_PREAMBLE}.$JOB_ID";      #Holds the PID of the job.
+		log_it "[$JOB_ID] Starting job $JOB_NUMB $job"; 
+
+		eval '( #set -x
+##				set -m; # interactive style bg jobs in their own process group. THIS STOP STDERR MONITORING 
+##				log_it "[$JOB_ID] About to Start COP job for  $JOB_NUMB.  "; 
+
+				( (time $job) 3>&1 1>&2 2>&3; print "$?" > $TMP_ERRCODE_FILE) |&   #works FINE
+				COP_PID=$!;  ALL_COP_PIDS="$ALL_COP_PIDS  $COP_PID";
+##				log_it "[$JOB_ID] Startng Monitor for  $JOB_NUMB.  with COP $COP_PID "; 
+				monitor_stderr "[$JOB_ID]" "$COP_PID";
+##				log_it "[$JOB_ID] Completed Monitor for  $JOB_NUMB.  "; 
+
+				JOB_DURATION=$(seconds_since ${START_SECS[JOB_NUMB]} );
+				  ERROR_CODE=$(cat           $TMP_ERRCODE_FILE);  
+				         DUR=$(secs2hms      $JOB_DURATION);
+				         CPU=$(kshtime2hmsms $CPU_REAL_TIME);
+
+				print "[$JOB_ID] returned $ERROR_CODE and ran for $DUR consuming $CPU cpu - $job" > $TMP_STAT_FILE;
+
+				log_it -t ${START_SECS[$JOB_NUMB]} "[$JOB_ID] Completed job $JOB_NUMB $job returning $ERROR_CODE. "; 
+
+##				log_it "[$JOB_ID] START Waiting for COP $COP_PID to terminate";   # no good, the $job has EOFd
+				wait $COP_PID;
+##				log_it "[$JOB_ID] FINISH Waiting for COP $COP_PID to terminate";  # no good, the $job has EOFd
+
+				exit;  # Think this is needed to clean up properly...
+		) 4>&1 1>&2 2>&4 | tee -a ${TMP_OUT_FILE}  & '  #E.O.eval
+
+	JOBPID[$JOB_NUMB]=$!;
+  ALL_RUN_PIDS="$ALL_RUN_PIDS  ${JOBPID[$JOB_NUMB]}";
+
+	log_it "[$JOB_ID] Job Started  $JOB_NUMB $job, PID ${JOBPID[$JOB_NUMB]}"; 
+
+	print "${JOBPID[$JOB_NUMB]}" >$TMP_JOBPID_FILE;
+	return $JOB_NUMB;
+}
+
+######################################################################################
+#       NB:  the jobs MUST BE NON-INTERACTIVE on STD-ERR
+#    Usage:  run_suit [-bg] job1 jobb jobc
+#               where each is a shell function
+######################################################################################
+run_suit() {   $TRACE_ALL_FNS;  #set -x ;    # This fn...
+##set -x;
+##set -b;  # F A I L S Please notify if any background job completes....
+##set -m;  # F A I L S interactive style background jobs in their own process group.
+
+###############  Start Of Fn    run_suit()   #######################
+
+	SUBRUN_NUMB=$(( 1 + $SUBRUN_NUMB ));
+	ALL_SUIT_PIDS="";
+	SUBRUN_ID="$INC_NNN.$SUBRUN_NUMB";
+	log_it "[$SUBRUN_ID]    Starting sub-run id $SUBRUN_NUMB: suit($@) " ;
+
+	BACKGROUND="no"; if [ "$1" = "-bg" ] ; then 
+		shift; BACKGROUND="yes" ; 
+		log_it "[$SUBRUN_ID]    Suit running in background. Will NOT wait for suit to complete."; 
+	fi
+
+	# Start All The Jobs Of The Suit
+	for job ; do  # I like this syntax - it uses $@ BUT KEEPS the param positions intact.
+		batch_kickoff_eval_job "$job";
+##		JUNK_JOBNUM="$?"; print "JUNKJOBNUM is $JUNK_JOBNUM";
+		ALL_SUIT_PIDS="$ALL_SUIT_PIDS ${JOBPID[$JOB_NUMB]}";
+	done  # for job in ...
+
+	if [ ! "$BACKGROUND" = "yes" ] ; then
+		log_it "[$SUBRUN_ID]    Suit completed starting ALL the jobs ($@)";
+		log_it "[$SUBRUN_ID]    Waiting for ALL jobs of this suit to complete ($@)";
+		wait $ALL_SUIT_PIDS
+		log_it "[$SUBRUN_ID]    All jobs completed for suit ($@)";
+	else
+		log_it "[$SUBRUN_ID]    Suit completed starting all jobs ($@)";
+		log_it "[$SUBRUN_ID]    Continuing. Not waiting for suit to complete. ";
+	fi
+} #run_suit()
+
+
+
+
+run_jcl() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+#
+# usage:: run_jcl BatchName {-bg} {-from step_num} {-to step_num} [fn_name]+
+#
+#
+	typeset -i    JCL_JOBNUMB="0"; typeset -Z2  JCL_JOBNUMB="0";
+
+	SUBRUN_NUMB=$(( 1 + $SUBRUN_NUMB ));
+	ALL_JCL_PIDS="";
+	SUBRUN_ID="$INC_NNN.$SUBRUN_NUMB"; 
+
+# J C L    Process parameters
+#############################
+
+
+	if [ "$1" == "-bg" ] ;  then
+		shift; JCL_IN_BG="yes1"; 
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:Running in Background $@";
+		(SUBRUN_NUMB=$(( $SUBRUN_NUMB - 1 ));run_jcl "$@")&
+		return;
+	fi
+
+	if [ -z "$1" ] ; then
+		print 'run_jcl: USAGE 
+run_jcl BatchName {-from step_num} {-to step_num} [fn_name]+
+';
+		exit 12;
+	else
+		JCL_NAME="$1"; shift;
+		log_it "[$SUBRUN_ID]    Starting sub-run id $SUBRUN_NUMB: JCL $JCL_NAME" ;
+	fi;
+	JCL_STEP_FILE="$BATCH_HOME/$ME.jcl.$JCL_NAME.step";
+
+	if [ "$1" == "-from" ] ;  then
+		shift; JCL_FROM_PARAM="$1"; shift;
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:FROM Parameter is $JCL_FROM_PARAM";
+	fi
+
+	if [ "$1" == "-to" ] ;  then
+		shift; JCL_TO_PARAM="$1"; shift;
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:TO  Parameter is $JCL_TO_PARAM";
+	fi
+
+	# JCL_FROM = 1 
+	# JCL_FROM = $JCL_FROM_PARAM    if it exists
+	# JCL_FROM = $JCL_FROM_RECOVER  if it exists
+	# JCL_FROM = $OverRideFrom      if it exists
+
+# J C L    F R O M
+##################
+	JCL_FROM="1";
+	if [ ! -z "$JCL_FROM_PARAM" ] ; then JCL_FROM="$JCL_FROM_PARAM"; fi;
+	JCL_FROM_RECOVER=$(< $JCL_STEP_FILE 2>/dev/null);
+	if [ $? -eq 0 ]  && [ $JCL_FROM_RECOVER -ne $JCL_FROM ] ; then 
+		JCL_FROM="$JCL_FROM_RECOVER"; 
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:RECOVERING From Previous Failure. Step $JCL_FROM_RECOVER";
+	fi
+
+	if [ ! -z "$JCL_OverRideFrom" ];  then
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:OVERIDEN START from $JCL_FROM  to $JCL_OverRideFrom";
+		JCL_FROM=$JCL_OverRideFrom;
+	fi
+
+# J C L    Build The JCL Step fns List
+#######################################
+	typeset -i JCL_STEP=$((0));  typeset -Z2  JCL_STEP=$((0));
+	while [ ! -z "$1" ] ; do
+		let JCL_STEP=$((1+ $JCL_STEP));
+		if [ ! -z "$TRACE_IT" ] ; then print "TRACE:Introducing Step $JCL_STEP: $1"; fi;
+		JCL_JOB[$JCL_STEP]="$1"; 
+		shift;
+	done
+	typeset -i JCL_NUM_STEPS=$(($JCL_STEP));
+
+# J C L    T O
+#################
+	JCL_TO="$JCL_NUM_STEPS";
+	if [ ! -z "$JCL_TO_PARAM" ] ; then JCL_TO="$JCL_TO_PARAM"; fi;
+	if [ ! -z "$JCL_OverRideTo" ];  then
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:OVERIDEN FINISH from $JCL_TO  to  $JCL_OverRideTo";
+		JCL_TO=$JCL_OverRideTo;
+	fi
+
+# J C L    Perform The JCL Step fns List
+#############################################
+
+	log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:PERFORMING STEPS from $JCL_FROM to $JCL_TO";
+	JCL_STEP=$JCL_FROM; 
+	while [ 1 ] ; do
+	  if [ "$JCL_NUM_STEPS - $JCL_STEP" -lt  0 ] ; then 
+			log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:COMPLETED All Steps Successfully - $JCL_FROM to $JCL_TO \n\n";
+			break; 
+		fi;
+
+		# Otherwise Perform the step.....
+		#################################
+		log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:$JCL_STEP:Starting jcl ${JCL_JOB[$JCL_STEP]}";
+		print "$JCL_STEP" > $JCL_STEP_FILE;
+		batch_kickoff_eval_job  ${JCL_JOB[$JCL_STEP]};
+		JCL_JOBNUMB="$?";   
+		  JCL_JOBID="$SUBRUN_ID.$JCL_JOBNUMB";
+		JCL_JOB_PID=$(<$TMP_JOBPID_PREAMBLE.$JCL_JOBID);
+
+		log_it "[$JCL_JOBID] $JCL_NAME:$JCL_STEP:Waiting for this jcl to complete, PID $JCL_JOB_PID";
+		wait $JCL_JOB_PID;
+		JCL_JOB_STATUS=$(<$TMP_ERRCODE_PREAMBLE.$JCL_JOBID);
+		log_it "[$JCL_JOBID] $JCL_NAME:$JCL_STEP:This jcl complete, PID $JCL_JOB_PID, Returned $JCL_JOB_STATUS";
+
+		if [ "$JCL_JOB_STATUS" -ne 0 ] ; then
+			log_it "[$JCL_JOBID] $JCL_NAME:$JCL_STEP:FAILED ${JCL_JOB[$JCL_STEP]} ERRORCODE $JCL_JOB_STATUS";
+			return $JCL_JOB_STATUS;
+		fi
+
+	  if [ "$JCL_STEP" -eq "$JCL_TO"   ]  ; then 
+			log_it "[$SUBRUN_ID]    JCL:$JCL_NAME:TERMINATED. Completed the Requested Steps from $JCL_FROM to $JCL_TO";
+			break; 
+		fi;
+
+		let JCL_STEP=$((1 + $JCL_STEP));
+	done
+	print "1" > $JCL_STEP_FILE;
+} # E.O.fn run_jcl
+
+
+
+
+batch_usage() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+	print "
+USAGE
+	How to use the 'batch definitions' (ksh) file.
+	In a ksh script, 
+	  o Define some env. var.s to configure operation,
+	  o source (dot execute) this file,
+	  o define your batch jobs by defining a funct, which calls 
+		o 'run_suit's and/or 'run_jcl's
+	  o run the batch jobs by calling your func
+
+TEMPLATE
+	batch.template at ~/scripts is a template file...
+
+EXAMPLE
+	# Define batch defns env. var.s
+	BATCH_HOME="$HOME/batch";    # This is where the CENTAL LOG FILE lives, 
+													     # and the incremental file is kept,
+	BATCH_TMP="/tmp";            # This is where the tmp files are kept,
+	BATCH_LOG="$BATCH_HOME/log"; # For captured stdout and stderr files,
+
+	# Source the batch defns file
+	'.' $HOME/.batch.defns
+	#NB IF the above env. var.s  have not been set they 
+	#   will now take on default values
+
+	# Define my batch of jobs using a funct
+	my_batch() {
+		fn_write_stderr_errnum2() { 
+			sleep 4;ls -ld $HOME;sleep 4; $XTERM_SHORT -help; ls -ld /tmp/LKJH; 
+		}
+		fn_write_stderr_twice()   { 
+			sleep 2;ls -ld $HOME/tmp /tmp/lakjkljlk  ; print fred 1>&2; 
+		}
+		fn_give_my_id()           { 
+			sleep 3; echo $LOGNAME; logname; id; whoami  ; 
+		}
+		run_suit "-bg"  "fn_write_stderr_errnum2  fn_give_my_id " 
+		run_suit        "fn_write_stderr_twice    fn_give_my_id"
+		run_jcl         "fn_give_my_id            fn_write_stderr_twice "
+		run_suit "-bg"  "fn_give_my_id  "        "fn_write_stderr_twice " 
+	}
+
+	# Call the batch
+	my_batch
+";
+}
+
+# 
+#   C h e c k s 
+#
+batch_checks() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+##set -x
+	BATCH_STAT=0;
+	if [ ! -x $BATCH_HOME ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot execute the \$BATCH_HOME $BATCH_HOME."; BATCH_STAT="1";
+	fi;	
+	if [ ! -w $BATCH_HOME ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot write the \$BATCH_HOME $BATCH_HOME."; BATCH_STAT="1";
+	fi;	
+
+	if [ ! -x $BATCH_TMP ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot execute the \$BATCH_TMP $BATCH_TMP."; BATCH_STAT="1";
+	fi;	
+	if [ ! -w $BATCH_TMP ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot write the \$BATCH_TMP $BATCH_TMP."; BATCH_STAT="1";
+	fi;	
+
+	if [ ! -x $BATCH_LOG ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot execute the \$BATCH_LOG $BATCH_LOG."; BATCH_STAT="1";
+	fi;	
+	if [ ! -w $BATCH_LOG ] ; then 
+		export MSSG="$MSSG \nERROR- Cannot write the \$BATCH_LOG $BATCH_LOG."; BATCH_STAT="1";
+	fi;	
+
+	if [ "$BATCH_STAT" -ne 0 ] ; then
+		batch_usage;
+		print "$0: has encountered environmental problems";
+		print "$0: ERROR - $MSSG";
+		print "$0: Please fix this, and restart.";
+		exit 99;
+	else
+		print "$0: Batch startup environment checks out OK.";
+	fi
+}
+
+
+########################################################################
+#
+#  T e s t   H a r n i s 
+#
+########################################################################
+
+test_run_suit() { $TRACE_ALL_FNS;  #set -x ;    # This fn...
+	start_viewer;
+##	fn_write_stderr_errnum2() { sleep 4;ls -ld $HOME;sleep 4; $XTERM_SHORT -help; ls -ld /tmp/LKJH; }
+	fn_write_stderr_errnum2() { sleep 4;ls -ld $HOME;sleep 4; ls -ld /tmp/LKJH; }
+	fn_write_stderr_twice()   { sleep 2;ls -ld $HOME/tmp /tmp/lakjkljlk  ; print fred 1>&2; }
+	fn_give_my_id()           { sleep 3; echo $LOGNAME; logname; id; whoami  ; }
+	fn_hog()                  { sleep 1; for each in /tmp/* ; do cat $each >/dev/null; done;  }
+	run_suit "-bg"  "fn_write_stderr_errnum2  fn_give_my_id " 
+	run_suit        "fn_write_stderr_twice    fn_give_my_id"
+	run_suit "-bg"  "fn_give_my_id  "        "fn_write_stderr_twice " 
+} 
+
+test_run_jcl() {
+	joe()    { print ":hi there Im joe....\n"; };
+	alf()    { print ":hi there Im alf....\n"; exit 2; };
+	fred()   { print ":hi there Im fred.... P1 $1 P2 $2 P3 $3 \n"; };
+	alice()  { print ":hi there Im alice....\n"; };
+
+	run_jcl TheBigOne                  joe alf "fred P1 2 3" alice;
+##	run_jcl TheMiddleOne -from 2       joe alf "fred P1 2 3" alice;
+##	run_jcl TheErrUmmOne -from 2 -to 3 joe alf "fred P1 2 3" alice;
+}
+
+
+###############################################################################
+#
+#   S t a r t U p    C o d e 
+#
+#    Even though this file is 'dot' ('.') executed, it has some
+#    initialisation code here. (In object parlance, instance creation)
+###############################################################################
+#
+SECONDS=0;
+batch_checks;
+get_next_INC;
+space_log_file;
+space_log_file;
+log_it "[$INC_NNN]       $ME:Release $RELEASE ($RCS_VER) Commencing" 
+start_viewer; 
+
+
+#
+# REGRESSION TEST HARNIS
+#
+#  Un-comment this to test my functionlity using my test-harnis
+#
+##test_run_suit;  #better still run batch.template as a test harnis
+
+
+

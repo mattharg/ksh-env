@@ -1,0 +1,339 @@
+# File:            $HOME/.kshrc.sets
+# See Also         $HOME/.kshrc*    
+# Description      Functions etc. to help with using 'set's
+# Implementation   set     == env.var 
+#                  element == a single text line within the env.var.
+# Restrictions     This means each element must NOT span a single line
+# I/F Design       Each fn uses the convenience of taking the NAME of the set(s)
+#                  (env.var.) as the param to the fns; elements are passed by value,
+#                  a single element per params;
+#                  NB: Set's COULD also be passed by value! This would help with funct
+#                      programming.....
+# ToDo             o Purely fnal-prog versions of these, that pass value args and use
+#                    eval_args,  eg. 
+#                      bool fn_set_is_member   set elem
+#                      set  fn_set_add         set elem
+#                      set  fn_set_union       set set {set}*
+#                      set  fn_set_intersect   set set {set}*
+#                      set  fn_set_cardinal    set {set}*
+#                      set  fn_set_normalise   set
+#                  o A way to select heavyweight or lightweight fns using aliases 
+#                  
+#                  
+# SET FUNCTIONS (Imperative)
+#
+#  set_show(NAME*)            Display the set. A line at a time; handy on command-line
+#  set_is_member(NAME item)   Returns '1' if item is a member of set NAME
+#  set_add(NAME item)         Adds item to set NAME
+#  set_union(NAME1 NAME2)     prints the union         of the two sets NAME1 and NAME2
+#  set_intersect(NAME1 NAME2) prints the intersection  of the two sets NAME1 and NAME2
+#  set_cardinal(NAME*)        prints the cardinality of the set NAME
+#  set_normalise(NAME*)       prints the Normalisation of the set NAME, ie. no repeats
+#  set_order(NAME*)           prints the Normalisation and Ordered set NAME
+#
+# APPL FUNCTIONS (Imperative)
+#  gp(regexp file*)           grep leaving behind GP
+#  xgp(set set)               filter like grep but for multiple regexps ? intersection?
+#
+# IMPLEMENTATIONS
+#
+#    LIGHTWEIGHT
+#      o set_is_member        each element [ "item" == "element" ] ; 
+#      o set_normalise        each element set_add empty_set element
+#      o set_intersect        each element - set_add
+#      o set_union            each element set_add element
+#
+#    HEAVYWEIGHT
+#      o set_is_member        /bin/grep 
+#      o set_normalise        print | sort | unique
+#      o set_intersect        xgrep grep using a tmp file
+#      o set_union            print SET1 SET2 | sort | unique
+#
+#
+#  set_choose_implementation  chooses either HEAVYWEIGHT or LIGHTWEIGHT set implementatin
+#
+#
+#
+#
+
+set_show() { $TRACING; #set -x;
+	for _setname ; do
+		LISTCMMD="print \"\${$_setname}\"";
+		eval "$LISTCMMD";
+	done; 
+}
+unalias ss 2>/dev/null; alias ss=" set_show";
+
+set_edit() { #set -x; # Edit An Env.Var. SET value
+	typeset TMPSCRIPT="/tmp/$$.ed_set.$$";
+	for setname; do
+		setvalue=$(eval print \"\$${setname}\");
+		print "$setname=\"$setvalue\";"  >   $TMPSCRIPT;
+		${VISUAL:-${EDITOR:-vi}}             $TMPSCRIPT;
+		chmod +x                             $TMPSCRIPT;
+		'.'                                  $TMPSCRIPT;
+	done;
+	/bin/rm -f                             $TMPSCRIPT;
+}
+unalias se 2>/dev/null; alias se=" set_edit";
+
+
+
+set_is_member() { $TRACING; #set -x;  
+# fn set_is_member() uses 
+#	param 1  As the *NAME* of an envvar which holds the set
+#	param 2* As text elements to test if a member of the set NAMED by $1
+# NB: Each item of the set is held as a seperate LINE in the env.var.
+# This fn returns 1 if a member is found, and 0 otherwise
+
+	typeset SET_NAME="$1"; shift; 
+
+	for _new_item in "$@" ; do
+		# For each new item given in the params, see if it exists
+		IN_THE_SET="1";   CMMD_PRINT_SET="print \"\$${SET_NAME}\"";
+		eval "$CMMD_PRINT_SET" | while read _current_item; do
+			if [ "$_current_item" == "$_new_item" ] ; then
+				IN_THE_SET="0"; break 2;
+			fi
+		done # all _current_items
+	done # all _new_items
+	return $IN_THE_SET;
+}
+
+set_add() { #$TRACING; set -x; 
+# fn set_add() uses 
+#	param 1  As the *NAME* of an envvar which holds the set
+#	param 2* As text elements to add to the set NAMED by $1
+# NB: Each item of the set is held as a seperate LINE in the env.var.
+
+	typeset SET_NAME="$1"; shift; 
+
+	for _new_item in "$@" ; do
+		# For each new item given in the params, see if it exists
+		if set_is_member $SET_NAME "$_new_item"; then
+			:
+		else
+			CMMD_ADD_SET="${SET_NAME}=\"\$${SET_NAME}
+$_new_item\"";
+			eval "$CMMD_ADD_SET" 
+		fi
+	done
+}
+
+set_minus() { #$TRACING; set -x; 
+# fn set_rem() uses 
+#	param 1  As the *NAME* of an envvar which holds the set
+#	param 2  As the *NAME* of an envvar which holds the other set
+# NB: Each item of the set is held as a seperate LINE in the env.var.
+# We print out set 1 - set 2;
+
+	typeset SET_MINUS="";
+	typeset SET1_NAME="$1"; shift; 
+	typeset SET2_NAME="$1"; shift; 
+
+	for _set1_item in $(set_show $SET1_NAME); do
+		# For each element of set 1, inlcude iff not in set 2 
+		if set_is_member $SET2_NAME "$_set1_item"; then
+			:
+		else
+			CMMD_BLD_SET="SET_MINUS=\"${SET_MINUS}
+$_set1_item\"";
+			eval "$CMMD_BLD_SET" 
+		fi
+	done
+	print "$SET_MINUS";
+}
+
+set_union() { #set -x; # SET_NAME SET_NAME
+	SET_UNION="";
+	SET_NAME1="$1"; IN_THE_SET1="1";   CMMD_PRINT_SET1="print \"\$${SET_NAME1}\"";
+	SET_NAME2="$2"; IN_THE_SET2="1";   CMMD_PRINT_SET2="print \"\$${SET_NAME2}\"";
+	CMMD_ASSIGN_SET="SET_UNION=\"\$$SET_NAME1\"";
+	eval "$CMMD_ASSIGN_SET";
+	eval "$CMMD_PRINT_SET2" | while read set2_item; do
+		set_add SET_UNION "$set2_item";
+	done
+	print "$SET_UNION";
+}
+
+
+set_intersect() { #set -x; # SET_NAME SET_NAME
+	SET_INTERSECT="";
+	SET_NAME1="$1"; IN_THE_SET1="1";   CMMD_PRINT_SET1="print \"\$${SET_NAME1}\"";
+	SET_NAME2="$2"; IN_THE_SET2="1";   CMMD_PRINT_SET2="print \"\$${SET_NAME2}\"";
+	SET2=$(eval "$CMMD_PRINT_SET2"); 
+	eval "$CMMD_PRINT_SET1" | while read set1_item; do
+		eval "$CMMD_PRINT_SET2" | while read set2_item; do
+			if [ "$set1_item" == "$set2_item" ] ; then
+				set_add SET_INTERSECT "$set1_item";
+			fi
+		done
+	done	
+	print "$SET_INTERSECT"
+}
+
+set_cardinal() { # SET_NAME (SET_NAME)*
+	for SET_NAME; do
+		CMMD_PRINT_SET="print \"\$${SET_NAME}\"";
+		eval "$CMMD_PRINT_SET" | wc -l;
+	done
+}
+
+set_normalise() { # SET_NAME (SET_NAME)*
+#If the set has repeated entries, REMOVE THEM.....
+	_TEMP_NORMAL_SET="";
+	for SET_NAME; do
+		CMMD_PRINT_SET="print \"\$${SET_NAME}\"";
+		eval "$CMMD_PRINT_SET" | while read _set_item; do
+			set_add _TEMP_NORMAL_SET "$_set_item";
+		done
+		CMMD_ASSIGN_SET="${SET_NAME}=\"$_TEMP_NORMAL_SET\"";
+		eval "$CMMD_ASSIGN_SET";
+	done
+}
+
+set_order() { # SET_NAME (SET_NAME)*
+#If the set has repeated entries, REMOVE THEM..... AND SORTS IN ORDER...
+	_TEMP_ORDERED_SET="";
+	for SET_NAME; do
+		CMMD_PRINT_SET="print \"\$${SET_NAME}\"";
+		eval "$CMMD_PRINT_SET" | sort | while read _set_item; do
+			set_add _TEMP_ORDERED_SET "$_set_item";
+		done
+		CMMD_ASSIGN_SET="${SET_NAME}=\"$_TEMP_ORDERED_SET\"";
+		eval "$CMMD_ASSIGN_SET";
+	done
+}
+
+set_save() { #set -x; 
+	for SET_NAME; do
+		CMMD_PRINT_SET="print \"\$${SET_NAME}\"";
+		eval "$CMMD_PRINT_SET" | sort > $HOME/.sets/$SET_NAME;
+		chmod 666                       $HOME/.sets/$SET_NAME;
+	done
+}
+
+set_restore() { set -x; 
+	for SET_NAME; do
+		CMMD_RESTORE_SET="$SET_NAME=\"\$(<$HOME/.sets/$SET_NAME)\" ";
+		eval "$CMMD_RESTORE_SET";
+	done
+}
+
+# REGRESSION TEST
+#################
+
+##MYSET="a 
+##b 
+##c 
+##d 
+##gee 
+##alice";
+##print "MYSET is $MYSET";
+##if set_is_member MYSET e "gee hello" c ; then print "it is\n"; else print "it isnt\n"; fi;
+##if set_is_member MYSET charles ; then print "it is\n"; else print "it isnt\n"; fi;
+##print "MYSET is $MYSET";
+##set_add MYSET "hello there"
+##print "MYSET is $MYSET";
+##set_add MYSET "gee"
+##print "MYSET is $MYSET";
+
+
+  ####   #####   ######  #####
+ #    #  #    #  #       #    #
+ #       #    #  #####   #    #
+ #  ###  #####   #       #####
+ #    #  #   #   #       #
+  ####   #    #  ######  #
+
+# Description
+#   A few fns to make grep more flexible.  grep is already REALLY flexible
+#   but it doesn't have one or two little things that makes things ar the 
+#   command line that little bit easier.
+#   gp reg fl+  std grep but leaves the list of matched files in $gp and
+#               also space the matches out a little nicer.
+#   |xgp reg+   grepping for a list of matches CONVENIENTLY
+#   |xgp_envvar implementation using env.var.s ONLY; Slow for large sets
+#               matches are left behind in $xgp
+#   |xgp_xpg4   implementation using XOpen's Portability Guide 4 ver. of grep
+#   |xgp_xpg4f  likewise but using two files NOT envvalues.
+#   |xgp        alias to the default ver. of xgp
+#  
+# TODO
+#   fmatch      returns the lines that are identical between two or more files
+#               alla set_union
+#   fnotmatch   returns the lines that are NOT identical
+alias xgp=" xgp_xpg4 ";
+
+
+gp() { #set -x;    # Usage : gp reg-exp {path-list}
+	unset gp_filename_L40 ; typeset -L40 gp_filename_L40;
+	unset gp_filename;      typeset      gp_filename;
+	gp="";
+	#WHY:Because we want to capture the matched files (? lines) into ENV VARs
+  #NB1:Some filenames CONTAIN an ':', which makes finding the break between
+	#    filename:string hard, so we use the -n which gives
+	#    filesname:linenum:string, which is a safer bet, but still NOT safe.
+	#NB2:It would be nice to space the table of text out nicely, but I haven't
+	#    figured that out in the ksh yet.
+	#
+	typeset GP_REGEXP="$1";  shift;  typeset GP_PATH_LIST="$@";
+
+	GP_OUTPUT=$(grep -n $GP_REGEXP $GP_PATH_LIST);
+	print "$GP_OUTPUT" | while read gp_line; do
+		 gp_filename="${gp_line%%:[0-9]*:*}"; gp_filename_L40=$gp_filename;
+		gp_occurance="${gp_line#*:[0-9]*:}";
+##		printf "%40s => $gp_occurance\n" "$gp_filename_L40"; #   printF is T O O    S L O W !!
+		print "$gp_filename_L40  => $gp_occurance";
+		set_add gp "$gp_filename";
+	done
+	print "\nFiles hit are \$gp = $gp\n"
+}
+
+  
+xgp_envvar() { #set -x; 
+# USAGE:       a command | xgp "this" "that" "tother";
+# DESCRIPTION: envvar ver. of (x)grep as a pure filter, 
+#              ie. using only STD-IN and STD-OUT
+# WHEN_TO_USE: If you just have a few strings this wholely ksh fn may be cheaper
+#              If the sizes are large use the ones below....
+	typeset PATTERN MATCH;
+
+	xgp="";    #This will hold the matches
+	while  read LINE  ; do for PATTERN ; do
+		MATCH="$LINE";
+		MATCH=${MATCH##*${PATTERN}};
+		MATCH=${MATCH%%${PATTERN}*};
+		if [ "$MATCH" != "$LINE" ] ; then
+			xgp="$xgp
+$LINE";
+		fi
+	done; done
+	print "$xgp";
+}
+
+xgp_xpg4() { #set -x;
+	#In solaris only grep at this path has the -e "setenvval"  option
+	typeset matchset="UttERNoneSencsee  d d d ";
+	for param; do
+		matchset="$matchset
+$param";
+	done
+  /usr/xpg4/bin/grep -e "$matchset"
+}
+
+xgp_xpg4f() { #set -x;
+	#In solaris only grep at this path has the -f filename option
+	typeset tmpsetfile="/tmp/xgp_unix.set";
+	for param; do
+		print "$param" >> $tmpsetfile;
+	done
+  /usr/xpg4/bin/grep -f $tmpsetfile
+	/bin/rm $tmpsetfile;
+}
+
+# !! How about a perl version of this ?? alla the ae1 algorithm
+
+
+
+

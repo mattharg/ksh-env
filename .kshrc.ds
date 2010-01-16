@@ -1,0 +1,177 @@
+# Data Structures
+# Stacks, Queues, Sets (elsewhere), linked-lists, trees, 
+
+# Singleton:: an        env. var., eg.  $ENVVAR
+# List::      a quoted  env. var., eg. "$ENVVAR"
+# An array::  a ksh array,         eg.  ${arr[1]}
+# A queue::   using arrays,        eg. item=popq que1   
+# A stack::   using arrays,        eg. pushstack stack1 $FRED, pop
+# A set::     imple'd elsewhere, each item on one line of a multiline env var
+# A hash (assoc. array):: ??
+# A linked list::
+#
+# STACKs 
+# ======
+# o void stack_push()       stackname value 
+# o void stack_pop()        stackname 
+# o bool stack_full()       stackname
+# o bool stack_empty()      stackname
+# o void stack_show()       stackname
+# o void stack_save()       stackname
+# o void stack_restore()    stackname
+#
+# QUEUEs (fifo)
+# ======
+# o bool queue_put()       queuename value
+# o bool queue_get()       queuename envvarname
+# o bool queue_full()      queuename
+# o bool queue_empty()     queuename
+# o void queue_show()      queuename
+#
+# SETs
+# ====
+# bool set_is_member  setname value
+# void set_add        setname value 
+# void set_union      setname setname 
+# void set_intersect  setname setname 
+# void set_cardinal   setname ... 
+# void set_normalise  setname ...  
+# void set_show       setname ...
+#
+# HASH (assoc.array)
+# ==================
+#
+# void hash_show      hashname
+# enum hash_add       hashname indexvalue elementvalue
+# enum hash_rm        hashname indexvalue 
+# enum hash_element   hashname indexvalue envvarname
+# enum hash_index     hashname envvarname elementvalue
+#
+# Implementation:
+#  We want to freely assoc. values, eg.
+#  n     index           element 
+#  -     -----           -------
+#  1:    big             my name
+#  2:    bad             your name
+#  3:    a wealth of     13,000 dollars
+#
+#  where,  there can be no duplicates of index values, but can be of elelement 
+#  values.
+#  Have two arrays (mappings) 
+#  hash_index_hashname   n --> the actual index   values
+#  hash_element_hashname n --> the actual element values
+#  Must also check for uniqueness of index values, and mark deletions
+#  and keep track of last index of array.
+#
+# LINKED LISTS
+# ============
+#
+# Q/ How to implement the 'ptr' concept part of linked lists? 
+#    A/ Perhaps have the ref as a NAME of another envvar.
+#    A/ Perhaps have the ref as an array index.
+# Q/ What would we use them for; 
+#    A/ Generating general purpose structures.
+#
+# 
+# ll_show()   llname            # Traverse the ll starting at llname
+# ll_insert() llname
+#
+#
+
+  ####    #####    ##     ####   #    #   ####
+ #          #     #  #   #    #  #   #   #
+  ####      #    #    #  #       ####     ####
+      #     #    ######  #       #  #         #
+ #    #     #    #    #  #    #  #   #   #    #
+  ####      #    #    #   ####   #    #   ####
+
+##alias stack_create
+stack_max_size=1000;
+
+stack_push() { #set -x; #     stackname value 
+	typeset sn="$1"; 	typeset val="$2";
+	typeset stn="stack_top_$sn";
+
+	typeset cmmd_stack_check_new=$(<<!EOCHECK
+if [ -z "\$$stn" ] ; then
+	$stn=0;
+fi
+!EOCHECK);
+	eval "$cmmd_stack_check_new";
+	typeset cmmd_stack_inc="let stack_top_$sn=\$((1 + \$stack_top_$sn))";
+	eval  "$cmmd_stack_inc";
+	typeset cmmd_stack_push="${sn}[\$$stn]=\"${val}\" ";
+	eval  "$cmmd_stack_push";
+}
+
+stack_pop()  { #set -x; #     stackname 
+	typeset sn="$1"; 	typeset val;
+	typeset stn="stack_top_$sn";
+	stack_empty $sn; if [ $? -ne 0 ] ; then
+		print "stack error:$sn empty" >&2; return 2;
+	else
+		typeset cmmd_stack_pop="val=\"\${${sn}[\$$stn]}\" ";
+		eval  "$cmmd_stack_pop";
+		typeset cmmd_stack_dec="let stack_top_$sn=\$(( \$stack_top_$sn - 1 ))";
+		eval  "$cmmd_stack_dec";
+		print "$val"; 	
+	fi
+}
+
+stack_full() { #     stackname
+	typeset sn="$1"; 	
+	typeset stn="stack_top_$sn";
+	typeset cmmd_stack_check_full=$(<<!EOCHECK
+if [ "\$$stn" -gt $stack_max_size ] ; then
+	print 1;
+else 
+	print 0;
+fi
+!EOCHECK);
+	return $(eval "$cmmd_stack_check_full");
+}
+
+stack_empty(){ #set -x; #     stackname
+	typeset sn="$1"; 
+	typeset stn="stack_top_$sn";
+	typeset cmmd_stack_check_empty=$(<<!EOCHECK
+if [ "\$$stn" -gt 0 ] ; then
+	print 0;
+else 
+	print 1;
+fi
+!EOCHECK);
+	return $(eval "$cmmd_stack_check_empty");
+}
+
+stack_show() { #set -x; #     stackname
+	typeset sn; for sn; do 
+		typeset   stn="stack_top_$sn";
+		typeset -i st=$(eval print \"\$$stn\");
+		while [ $st -gt 0 ] ; do
+			cmmd_print_item="print \"$st:\${$sn[$st]}\"";
+			eval "$cmmd_print_item";
+			st=$(($st -1));
+		done
+	done
+}
+
+stack_save() { #set -x; #     stackname
+	typeset sn; for sn; do 
+		stack_show $sn >$HOME/.stacks/$sn;
+		chmod 666       $HOME/.stacks/$sn;
+	done
+}
+
+stack_restore() { #set -x; #     stackname
+	typeset sn; for sn; do 
+		cat $HOME/.stacks/$sn | while read _stack_item; do
+			_stack_index=${_stack_item%%:*};
+			_stack_value=${_stack_item#*:};
+			cmmd_stack_create_item="$sn[$_stack_index]=\"$_stack_value\" ";
+			eval "$cmmd_stack_create_item"; 
+		done
+	done
+}
+
+

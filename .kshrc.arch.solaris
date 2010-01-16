@@ -1,0 +1,7 @@
+# File:           ~/.kshrc.arch.solaris
+# Description     ksh functions and alias' spec. for the solaris platform
+# See Also        Other architecture, eg. .kshrc.arch.hpux, ...aix, ..
+# Usage           Normally called from .kshrc.architecture, called from .kshrc
+
+alias prtdiag=/usr/platform/`uname -i`/sbin/prtdiag
+

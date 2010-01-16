@@ -1,0 +1,1012 @@
+# File:          $HOME/.kshrc.fns.paths
+# Usage:         called by .kshrc ONLY FOR INTERACTIVE ksh's 
+# Description:   provides some useful utils for dealing with paths
+# See Also       $HOME/.kshrc.fns    $HOME/.kshrc.aliases    
+# To Do:         o Tidy up the use of local var's to fns - typeset those not needed
+#                o Adopt the new convention of wh() leaving behind $wh, NOT $WH.
+#                o 
+#                o 
+##set -x 
+
+###################################################
+#       T A B L E     O F      F U N C T I O N S 
+###################################################
+#
+# dirs()           path {path}*   ls -ld directories ONLY ($DIRS holds them)
+# atpath()         path command   cd to path and execute command IN A SUBSHELL
+# ap()             path command   cd to path and execute command IN CURRENT SHELL
+# show_path()      {$MANPATH}     show the separate path that make up $(MAN)PATH. 
+#                                 ($SP holds them)
+# add_path()       PATH {path}+   adds's the path to the env-var PATH in PATH format
+# ed_path()        {PATH}         edit's the env-var that is in $PATH format, defaults to PATH
+# ff()             pathlist       find pathlist -print & then ls -ld them ($FF holds them)
+# wh()             cmmd {-pg}     find cmmd in $PATH and execute pg on it, -cat -ls .....
+# lstoday()                       Lists files that have changed today - faulty?
+# runpath()        apath          Traverse a path spec. to see where it stops being valid.
+# abs_path()       apath {dir}    Get the Absolute path of apath supplied.
+# true_path()      apath {dir}    Returns the true (unlinked) path for apath.
+# ulp()            apath {apath}* Returns the UnLinkedPath  for (many) paths.
+# do_ulp()         apath {-ls}    Gives the ulp and performs the -command on it.
+# ump()            apath {apath}* Returns the UnMountedPath for (many) paths.
+# search_path()    cmmd
+# path_from_inc()    cpp_line       Generates a $PATH-like env.var. from CPP line.
+#
+#  !!  UPDATE ME !!
+#
+# mkdircd()
+# atpath()
+# freeze_paths()
+# apply()
+# follow_link()
+# path_to_list()
+# cksumtree_diff()
+# save_modes_tree()
+# restore_modes_tree()
+# open_modes_tree()
+# lastfile()
+# mvAndLn()
+# reportMoved()
+# cpNewerVersionAtOtherPaths()
+# checkSumsOfDupPaths()
+#
+# Possible Additions
+# cd()   my own ver. to keep history etc. 
+#
+#
+
+alias cdmkdir=" mkdircd ";
+mkdircd() { mkdir $1; cd $1; }
+
+dirs() { #set -x  #prints out each file that is a directory, ie. Usage dirs a*
+	typeset DIRS_ARGS="$*";   
+	typeset DIRS_ALLFILES=$(ls -a);
+	typeset DIRS_FILELIST=${DIRS_ARGS:-$DIRS_ALLFILES}; 
+	typeset _each;
+	dirs=""; for _each in $DIRS_FILELIST; do
+		if [ -d $_each  -a $_each != "." -a $_each != ".." ] ; then 
+			dirs="$dirs $_each"; 
+		fi
+	done
+	if [ ! -z "$dirs" ] ; then ls -ld $dirs ; fi
+	print "dirs=\"$dirs\""; 
+}
+
+atpath() { #set -x    # sub-shell ver...
+#atpath PATH rest_of_line     perform  the rest of the line at the path PATH
+	typeset OLDATPATH="$PWD"; 
+	typeset ATPATH="$1"; shift
+	(cd $ATPATH; eval "$*"; cd $OLDATPATH);
+}
+
+ap() { #set -x    # NON-sub-shell ver...
+#ap PATH rest_of_line     perform  the rest of the line at the path PATH
+	typeset OLDATPATH="$PWD"; 
+	typeset ATPATH="$1"; shift
+	{ cd $ATPATH; eval "$*"; cd $OLDATPATH; } ;
+}
+
+# show_PATH = show_PATH == sp
+
+show_path() { #set -x; 
+	typeset SHOW_PATHS="${@:-PATH}";
+	typeset each_pathlist_name;
+
+	for each_pathlist_name in $SHOW_PATHS; do
+		eval "print \"\$${each_pathlist_name}\"" | while read pathlist; do
+			print "Paths for $each_pathlist_name are ::" 1>&2;
+			SHOW_PATH=$(
+			OLDIFS="$IFS"; IFS=":"; set -- $pathlist; IFS="$OLDIFS";
+			for each_path; do print "$each_path"; done; print "\n";
+			);
+			print "$SHOW_PATH";
+		done;
+	done; 
+}
+
+add_path() { #set -x; # ENV_VAR_NAME {path}+
+# Add's a path to the env-var, in $PATH format, does checking..
+# ! check for DUPLICATES
+# ! check -x of each pathname
+# ! check length of the env-var....
+#
+
+##  print "add_path(): $*";
+	ADD_PATH_NAME="${1}"; shift;
+	for pathname in "$*"; do
+		if [ ! -x "$pathname" ] ;then
+			print "Ignoring this non-executable path::$pathname" 1>&2;
+		else
+			DUPLICATES=`show_path $ADD_PATH_NAME | /bin/grep "^${pathname}$"` 2>/dev/null
+			if [ ! -z "$DUPLICATES"  ] ;then
+				print "Ignoring duplicate path::$pathname" 1>&2;
+			else
+				if [ "$TRAVEL_FIRST_PATH" != 0 ] ; then
+					TRAVEL_FIRST_PATH=0;
+					eval "$ADD_PATH_NAME=\"$pathname\";";
+##					print "add_path(): !!!!!!!!!!!!Resetting PATH $ADD_PATH_NAME";
+				else
+					eval "$ADD_PATH_NAME=\"\$${ADD_PATH_NAME}:$pathname\";";
+				fi
+			fi
+		fi
+	done
+}
+
+freeze_paths() { 
+# A new /bin/ksh (without the -p) will attempt to
+# keep the old PATHs by assigning MATTS_.. to them
+# So, if you want your PATH... to persist across a new
+# invocation of /bin/ksh, call this fn.
+	eval 'MATTS_LD_LIBRARY_PATH=$LD_LIBRARY_PATH';
+	eval 'MATTS_PATH=$PATH';
+	eval 'MATTS_MANPATH=$MANPATH';
+}
+
+unalias edpath 2>/dev/null; alias edpath=ed_path;
+unalias ep     2>/dev/null; alias     ep=ed_path;
+ed_path() { #set -x; 
+#
+	if [ "xx$1" = "xx-non-interactive" ] ; then
+		shift; typeset DONT_EDIT="true";
+##		print "ed_path Setting path ${1:-PATH}";
+	fi
+	ED_PATH_NAME="${1:-PATH}";
+	TMPSCRIPT="/tmp/$$.ed_path.$ED_PATH_NAME.$$";
+	show_path $ED_PATH_NAME 2>/dev/null >$TMPSCRIPT;
+
+	if [ "$DONT_EDIT" != "true" ] ; then
+		${VISUAL:-${EDITOR:-vi}}          $TMPSCRIPT;
+	fi
+
+	# Check the path is GOOD..
+	eval "$ED_PATH_NAME=\"\";";
+
+	typeset TRAVEL_FIRST_PATH=1;
+
+	typeset pathNameList=$(/bin/cat $TMPSCRIPT | /bin/sed 's,^,add_path '"$ED_PATH_NAME"' ",g' | /bin/sed 's, *$,",g' > $TMPSCRIPT.ksh);
+##	print "$pathNameList"; 
+##	for pathname in $(print "$pathNameList"); do
+##		print "ed_path(): Adding Path $pathname";
+##		add_path $ED_PATH_NAME "$pathname";
+##	done;
+
+	'.' $TMPSCRIPT.ksh
+##	for pathname in $(< "$TMPSCRIPT"); do
+##		print "ed_path(): Adding Path $pathname";
+##		add_path $ED_PATH_NAME "$pathname";
+##	done;
+
+
+##	/bin/cat  $TMPSCRIPT | while read pathname; do  # WE ARE IN A SUB_SHELL HERE.....
+##		add_path $ED_PATH_NAME "$pathname";
+##	done;
+
+##	for pathname in $(/bin/cat $TMPSCRIPT| while read XpathnameX; do echo \"$XpathnameX\"; done); do
+##		add_path $ED_PATH_NAME $pathname;
+##	done;
+
+##	typeset pathNameList=$(<$TMPSCRIPT);
+##	CMMD_PRINT_THE_LIST="print \"\$${pathNameList}\"";
+##	eval "$CMMD_PRINT_THE_LIST" | while read pathname; do  # ???ARE WE IN A SUB_SHELL HERE.....
+##		add_path $ED_PATH_NAME "$pathname";
+##	done;
+
+
+	/bin/rm -f                            $TMPSCRIPT;
+##	/bin/rm -f                            $TMPSCRIPT.ksh;
+##	show_path $ED_PATH_NAME;
+}
+
+pathlist_store() { ##set -x;
+	typeset NAME_BASE="";	      # Name of this list, eg. project name etc.
+	typeset PATH_TYPE="PATH";	  # or LD_LIBRARY_PATH, or MANPATH, or...
+	typeset PATH_LIST
+	typeset SHORT_DATE="`/bin/date '+%a%d%b_%H_%M_%S'`";
+
+	if [ "${1%PATH}" != "${1}" ] ; then 
+		PATH_TYPE="$1"; 
+		shift; 
+	fi;
+	if [ ! -z "$1" ] ; then
+		NAME_BASE="$1";
+	else
+		print "pathlist_store: {SPEC_PATH} projectA ";
+	fi
+
+	PATH_LIST=$(show_path $PATH_TYPE 2>/dev/null);
+	typeset pathListFile=$HOME/.path.$PATH_TYPE.$NAME_BASE;
+	print "$PATH_LIST" > $pathListFile;
+	print "pathlist_store: Stored to $pathListFile";
+	        pathListFile=$HOME/.path.$PATH_TYPE.$NAME_BASE.$SHORT_DATE;
+	print "$PATH_LIST" > $pathListFile;
+	print "pathlist_store: Stored to $pathListFile";
+}
+alias pl_store=pathlist_store;
+
+pathlist_show() { #set -x;
+	typeset NAME_BASE="";	      # Name of this list, eg. project name etc.
+	typeset PATH_TYPE="PATH";	  # or LD_LIBRARY_PATH, or MANPATH, or...
+	typeset PATH_LIST;
+	typeset SHORT_DATE;
+
+	if [ "${1%PATH}" != "${1}" ] ; then 
+		PATH_TYPE="$1"; shift; 
+	fi;
+	if [ ! -z "$1" ] ; then
+		NAME_BASE="$1"; shift;
+	else
+		print "pathlist_show: {SPEC_PATH} { projectA } ";
+	fi
+
+	typeset fileSelected=$HOME/.path.$PATH_TYPE.$NAME_BASE;
+	if [ ! -z "$1" ] ; then
+		SHORT_DATE="$1"; shift;
+		fileSelected=$fileSelected.${SHORT_DATE};
+	fi
+
+	namedcat $HOME/.path.$PATH_TYPE.${NAME_BASE}
+	print "\npathlist_show: All other versions";
+	ls -1d ${fileSelected%.*}*;
+}
+alias pl_show=pathlist_show;
+
+export CREATE_PATH_SPEC_NAWK=$(cat <<!END_OF_SCRIPT
+BEGIN   { print; print; }
+        { printf "%s:", $1; }
+END     { print; }
+!END_OF_SCRIPT
+);
+
+export CR_PA_SP_NAWK='{ printf "%s:", $1; }';
+
+pathlist_select() { #set -x
+
+	typeset NAME_BASE="";	      # Name of this list, eg. project name etc.
+	typeset PATH_TYPE="PATH";	  # or LD_LIBRARY_PATH, or MANPATH, or...
+	typeset PATH_LIST
+	typeset SHORT_DATE="`/bin/date '+%a%d%b_%H_%M_%S'`";
+
+	if [ "${1%PATH}" != "${1}" ] ; then 
+		PATH_TYPE="$1"; 
+		shift; 
+	fi;
+	if [ ! -z "$1" ] ; then
+		NAME_BASE="$1";
+	else
+		print "pathlist_select: {SPEC_PATH} { projectA { datestring }} ";
+	fi
+
+	if [ -z "$NAME_BASE" ] ; then # No name given - advise the options
+		print "select_pathlist: Here are the available files";
+		(\cd >/dev/null 2>&1; ls -1 .path.$PATH_TYPE.${NAME_BASE}*     )#      | sed "s,^.path.$PATH_TYPE,,")
+		print "select_pathlist: Info: No pathlist selected";
+	else # It's spec'd
+		typeset fileSelected=$HOME/.path.$PATH_TYPE.$NAME_BASE;
+		if [ -f $fileSelected ] ; then
+		pathSpec=$(cat $fileSelected | awk -F: "$CR_PA_SP_NAWK");
+		echo "pathlist_select: PathSpec is $pathSpec";
+		cat $fileSelected;
+		eval $PATH_TYPE=\"$pathSpec\";
+		fi;
+	fi
+}
+alias pl_select=pathlist_select;
+
+
+# show_PATH = show_PATH == sp
+unalias show_PATH 2>/dev/null; alias show_PATH=show_path;
+unalias sp        2>/dev/null; alias        sp=show_path;
+
+# Old Dumb Way before I figured out how to use the ksh.....
+##show_PATH() { #set -x #display supplied (default $PATH) one item per line
+##	SHOWPATH=${1:-$PATH};
+##	# NB This has the problem that !awk! always puts the first item of the list LAST!
+####	SP=$(print "$SHOWPATH" | awk  '{split($1, parts, ":"); for (part in parts) {print parts[part]}}');
+##	SP=$(print $SHOWPATH | sed 's,:, ,g');
+##	print "Paths are \$SP="; for _SP in $SP; do print "$_SP"; done
+##}
+
+
+ff() { #set -x; # Usage - ff {path-list}
+	#WHY:Because doing 'find path -ls or -exec ls' is to costly for large numbers of files
+	#    It's better to generate a filelist and then pass that list to a CMMD
+	#NB: The file list is held in $FF, for subsequent usage..., eg. rm -i $FF
+
+	FF_PATH_LIST="";  unset FF_PATH_LIST;
+	FF_FIND_PARM="";  unset FF_FIND_PARM;
+	while [ ! -z "$1" ] ; do
+		case $1 in
+			-print)    shift;;
+			-name)     shift; FF_FIND_PARM="$FF_FIND_PARM -name $1"; shift;;
+			*)                FF_PATH_LIST="$FF_PATH_LIST $1";       shift;; 
+		esac;
+	done
+
+	FF_PATH_LIST="${FF_PATH_LIST:-.}"; 
+	FF=$(find $FF_PATH_LIST $FF_FIND_PARM -print 2>/dev/null); 
+	ls -ld  $FF | ${FF_CMMD:-$PAGER};
+}
+
+
+search_path() {
+ #set -x; 
+	# Searchs $[LD_LIBRARY]PATH for filename
+	typeset USAGE='
+NAME
+  search_path()  - searches $PATH or $LD_LIBRARY_PATH for the given files
+                   Note NOT useful for MANPATH. Instead use findmanpage().
+SYNOPSIS
+  search_path [-g] [-L]  [PATH | LD_LIBRARY_PATH] fred /bin/alf
+-g option will grep for any file matching the filenhame
+-L option will symlinks to be followed.
+DESCRIPTION
+  A line is printed for each file found in PATH.
+  The "PATH" searched defaults to $PATH.  If an absolute pathname is 
+  given, it will be excluded from the list of printed paths.
+SEE ALSO
+	(/bin/)type   This only gives the first one found in PATH
+';
+	if [ $# -eq 0 ] ; then
+		print "$USAGE"; return;
+	fi
+
+	typeset grepping=0;
+	typeset followsymlinks=0;
+	if [ "x$1" = "x-g" ] ; then grepping=1;       shift; fi;
+	if [ "x$1" = "x-L" ] ; then followsymlinks=1; shift; fi;
+
+	case $1 in
+		*PATH) show_path $1>/dev/null; shift;;
+		    *) show_path   >/dev/null;;
+	esac;
+	
+	SEARCH_PATH=""; 
+	typeset each_path candidate candidate_bn;
+	for candidate; do
+		candidate_bn=${candidate##*/};
+		for each_path in $SHOW_PATH; do 
+			if [ "$grepping" = 1 ]; then # grep for each match
+				typeset all=$(echo $each_path/*${candidate_bn}*);
+				if [ "$each_path/*${candidate_bn}*" != $all ] ; then
+					SEARCH_PATH="$SEARCH_PATH $all";
+				fi
+			else # Std non-grep method
+				poss=$each_path/$candidate_bn;
+				if [ -f $poss -a "$poss" != "$candidate" ] ; then 
+					SEARCH_PATH="$SEARCH_PATH $(echo $poss)"; 
+				fi; 
+			fi;
+		done;
+	done;
+
+	if [ $followsymlinks = 1 ] ; then
+		if [ ! -z "$SEARCH_PATH" ] ; then
+			for SRCH in $SEARCH_PATH; do
+				/bin/ls -ld $SRCH;  
+				if [ -L $SRCH ] ; then
+					follow_link $SRCH;
+				fi;
+				print; 
+			done;
+		fi
+	else
+		/bin/ls -ld $SEARCH_PATH;
+	fi
+
+}
+apply() { #set -x;
+	# Performs each of the supplied progs passing each the same
+	# parameter list and the same redirection
+	typeset USAGE='
+NAME
+  apply()    - Performs each of the supplied progs passing each
+						   the same parameter list and the same redirection
+SYNOPSIS
+  apply /a/b/proga /c/d/e/progb /g/progd -params -v filea
+DESCRIPTION
+	Each prog is executed in turn supply the same parameters to each
+	i.e. It has the same result as
+	/a/b/proga   -v filea
+	/c/d/e/progb -v filea
+	/g/progd     -v filea
+';
+	typeset apply_progs apply_params p;
+	if [ -z "$1" ] ; then
+		print "$USAGE"; return;
+	fi
+
+	while [ ! -z "$1" -a "$1" != "-params" ] ; do
+		apply_progs="$apply_progs $1";
+		shift;
+	done
+
+	if [ "$1" = "-params" ] ; then shift; fi;
+	while [ ! -z "$1"  ] ; do
+		apply_params="$apply_params $1";
+		shift;
+	done
+
+	for p in $apply_progs; do
+		runit="$p $apply_params";
+		print "apply() Performing $runit";
+		eval $runit;
+	done
+
+}
+
+
+
+follow_link() { #set -x;
+# follow_link should FOLLOW the link, traversing ALL 
+# intermediary symlinks.  However, we just use true_path (ulp)
+# until I can be bothered to fix it.
+# The Followed link needs to be returned in $follow_link
+	typeset candidate link LSLD;
+	for candidate; do
+
+		ls -ld $candidate;
+		if [ -L $candidate ] ; then
+			LSLD=$(ls -ld $candidate); 
+			link=${LSLD##*-\> };
+##			abs_path $link; link=$ABSOLUTE_PATH
+			case "$link" in
+				"/"*)  # An Absolute path - OK
+					;;
+				"./"*) # Relative - Same
+					link="$(dirname $candidate)/${link##./}";
+					;;
+				"../"*) # Relative - One Up
+					dn=$(dirname $candidate);
+					link="${dn%/*}/${link##../}";
+					;;
+				*) # Simple
+					link="$(dirname $candidate)/${link##./}";
+					;;
+			esac;
+
+##			true_path $candidate; link=$TRUE_PATH;
+
+			follow_link=$link;  # Assign $follow_link to current file
+			follow_link $link;  # Recurse to check for futher links
+		else
+			if [ ! -e $candidate ] ; then  # This is the WRONG place..... further down...
+				print "$candidate doesn't exist!";
+				return;
+			fi;
+		fi
+	done
+}
+alias fl="follow_link";
+
+
+
+wh() {   # set -x;
+	typeset FIND_SHFUNC_NAWKSCRIPT=' /[]+\(\) {/  {
+		printf "% 20s:\t%s\n", FILENAME, $0; } '
+
+	typeset IT="$1";
+	if [ -z "$IT" ] ; then 
+		print 'wh cmmd { -ulp -ump -pg -ls -vi -VI -cat -sum -rlog -file -strings -what -e cmmd}'
+		return;
+	fi;
+  case $IT in
+		"/"*|"./"*|"../"*)  ;;
+		*) search_path $IT; print "";;  #NB ONLY Search PATH for all occurances IFF simple-path-spec
+	esac;
+
+	typeset WHERE=$(type $IT 2>&1); 
+	wh=${WHERE##${IT} is }
+	print ${wh}
+	case $wh in
+		"a function")     (cd $HOME;  nawk "$FIND_SHFUNC_NAWKSCRIPT" .ksh* | grep "$IT()"); typeset +f $IT;;
+
+		"an alias for"*)  print "Which is.."; wh ${wh##an alias for };;
+		"/"*)             if [ -L $wh ] ; then 
+												follow_link $wh; 
+												wh ${follow_link}; 
+											fi;;
+		*"not found")     return;;
+		*)                print "Ignoring $wh"; return;;
+	esac;
+
+	while [ ! -z "$2" ] ; do
+		case $2 in 
+			-ulp)     ulp        "$wh"; wh="$ULP";;
+			-ump)     ump        "$wh"; wh=$"UMP";;
+			-df)      df -kl     "$wh";;
+			-pg)      $PAGER     "$wh";;
+			-ls)      ls -ldF    "$wh";;
+			-vi)      vi         "$wh";;
+			-VI)      $VI        "$wh";;
+			-cat)     cat        "$wh";;
+			-sum)     cksum      "$wh";;
+			-rlog)    rlog       "$wh";;
+			-file)    file       "$wh";;
+			-what)    what       "$wh";;
+			-strings) strings    "$wh";;
+			-dump)    cwdumps -s "$wh";;
+			-e)       $3         "$wh"; shift;;
+			-apply_all)   shift; shift; apply $SEARCH_PATH -params "$*";;
+			*)    print "dont know how to do $2";;
+		esac;
+		shift;
+	done
+}
+
+lstoday() { #set -x  # list files that are on that day... WHY NOT USE /bin/find -mtime ...
+	#Ideas:: allow simillar fns to wh(), loop on each file, 
+	LSFLAGS=""; LSTODAY=""; NINE="9"; SHORT_DATE="`date '+%b %d'`"; 
+	while [ ! -z "$1" ] ; do
+		PARAM="$1"; RMDASH=${PARAM#-}
+		if [ "$PARAM" = "$RMDASH" ] ; then
+			SHORT_DATE="$PARAM";
+		else
+			LS_FLAGS="$LSFLAGS $PARAM"; 
+		fi
+		shift;
+	done
+	export LS_FILES=$(ls -la | awk  "/$SHORT_DATE/ {print \$${NINE}}")
+##	ls -d $LS_FLAGS $LS_FILES
+	for file in $LS_FILES; do
+		if [ "$file" = "."  -o  "$file" = ".." ] ; then
+			print "dotty" >/dev/null
+		else
+			ls -d $LS_FLAGS $file
+			LSTODAY="$LSTODAY $file"
+		fi
+	done
+}
+
+runpath() { #set -x  # Tranverse path to find where it vanishes or looses permissions
+	abs_path $1; p=$1; 
+	runner="";  ffb="00"; fff="11";
+	
+	until [ "$ffb" = "$fff" ] ; do
+		fff=${p%%/*};   
+
+		if [ "$runner" = "/" ] ; then 
+			runner="/$fff"; 
+		else
+			runner="$runner/$fff";    
+		fi; 
+
+##		print "front $fff"; print "back $ffb"; print "runner $runner";
+		ls -ldF $runner; if [ $? -ne 0 ] ; then return; fi; 
+		ffb=${p#*/};   p=$ffb;
+	done
+}
+																													
+ERROR_FILE_NOT_PRESENT="66"
+
+## IF ONLY IT checked THE WHOLE PATH NOT JUST THE FIRST BIT
+
+abs_path() { #set -x   #Usage:  abs_path   path1   [path2]
+# This function takes a valid path parameter, path1
+#    eg.       'a/b',   '/a/b',      'a',    './a',  '../a/b'
+# and returns its ABSOLUTE PATH in the env.var. $ABSOLUTE_PATH, 
+#    eg.  '$PWD/a/b'    '/a/b'  '$PWD/a'  '$PWD/a' '/x/y/c/b'
+#     using the parent directory if supplied, as path2, 
+#     otherwise defaults to $PWD
+
+	p=$1; d=${2:-$PWD};
+
+	p_first_dir=${p%%/*}
+	p_rest_dirs=${p#*/}
+
+	if [ -z "$p_first_dir" ] ; then
+		IS_ABSOLUTE="true"; ABSOLUTE_PATH="$p"
+	else
+		IS_ABSOLUTE="false"
+		# but what sort of relative path?  a,    ./a,   ../a
+		if   [ "$p_first_dir" != ".."  ] ; then
+			ABSOLUTE_PATH="$d/$p"
+		else 
+			d_all_but_last_dir=${d%/*}
+			ABSOLUTE_PATH="$d_all_but_last_dir/$p_rest_dirs"
+		fi
+	fi
+}
+
+true_path() { #set -x #USAGE: true_path path1 [path2]
+# true_path sets the value of 
+# TRUE_PATH to be 
+#   the true path of the first param,
+#   "NOT_PRESENT", if not present        (setting $? to $ERROR_FILE_NOT_PRESENT)
+# TRUE_TYPE to be one of {symlink, directory, regfile, not_present}
+# path1 is either absolute or, if relative, relative to path2
+
+	TRUE_PATH=""; TRUE_TYPE=""
+	file="$1";    ATPATH="${2:-$PWD}"
+
+# 1: Make The Path ABSOLUTE
+###########################
+
+ 	abs_path $file $ATPATH; file=$ABSOLUTE_PATH
+
+# 2: If this path is a SYMLINK substitute it (using recursion)
+##############################################################
+
+	if   [ -f "$file" ] ; then TRUE_TYPE="regfile";    TRUE_PATH=$file
+	elif [ -L "$file" ] ; then TRUE_TYPE="symlink";    LINK_LOCATION=${file%/*}
+		LS_LINK=`ls -ld $file`; TRUE_PATH="${LS_LINK##*-\> }"    
+		true_path $TRUE_PATH $LINK_LOCATION
+		return
+	elif [ -d "$file" ] ; then TRUE_TYPE="directory";   TRUE_PATH=$file
+	elif [ -c "$file" ] ; then TRUE_TYPE="device";      TRUE_PATH=$file
+	elif [ -b "$file" ] ; then TRUE_TYPE="device";      TRUE_PATH=$file
+	elif [ -p "$file" ] ; then TRUE_TYPE="pipe";        TRUE_PATH=$file
+	else                       TRUE_TYPE="not_present"; TRUE_PATH="DOES_NOT_EXIST.$file"
+		print "$TRUE_PATH"  
+##		exit  $ERROR_FILE_NOT_PRESENT  
+		return  $ERROR_FILE_NOT_PRESENT  
+	fi
+
+# 3: Traverse this absolute, non-symlink path looking for 
+#    embedded symlinks, and, if found, FOLLOW THEM using recursion
+###################################################################
+
+	# oripath:: at this point $file is an ABSOLUTE path, remove the initial '/'
+	# oripath:: to stop getting an initial double '//'
+	#                      Each time through loop        On completion
+	oripath="${file#/}"   # oripath shrinks  the LHR     we're done when its empty
+	newpath=""            # newpath grows    the RHS     should be full
+
+												# and we check for 1) symlinks 2) ./ and 3) ../
+	while [ ! -z "$oripath" ] ; do
+		first_dir=${oripath%%/*}
+		rest_dirs=${oripath#*/}
+
+		if   [ "$first_dir" = "."  ] ; then true_path $rest_dirs; 
+		elif [ "$first_dir" = ".." ] ; then abs_path $oripath $newpath;
+			                                  true_path $ABSOLUTE_PATH
+		else # not a relative path
+			COMB="$newpath/$first_dir"
+			if [ -L "$COMB" ] ; then
+				LINK_LOCATION=${file%/*}; 
+				LS_LINK=`ls -ld $COMB`
+				TRUE_TYPE="symlink"
+				TRUE_PATH="${LS_LINK##*-\> }"
+				newpath="$TRUE_PATH"
+			else
+				newpath="$newpath/$first_dir"
+			fi
+		fi
+
+		# test for exit condt
+		if [ "$first_dir" = "$rest_dirs" ] ; then  # the exit condition
+			TRUE_PATH="$newpath"; break
+		fi
+		# otherwise repeat the loop with a NEW oripath
+		oripath="$rest_dirs"
+	done
+
+# 4: one final opportunity to detect a SYMLINK
+##############################################
+
+	if [ "$TRUE_TYPE" = "symlink" ] ; then 
+		true_path $TRUE_PATH $LINK_LOCATION 
+	fi
+}
+
+ulp() { #set -x
+	ulp=""; typeset ULP_PATH;
+	for ULP_PATH; do
+		true_path $ULP_PATH $PWD; 
+		if [ $? -eq 0 ] ; then ulp="$ulp $TRUE_PATH";  fi; 
+		print "$TRUE_PATH" 
+	done
+}
+
+do_ulp() { #set -x
+# do_ulp filename {-cat|-pg|...}
+# NB This uses unlinked.path, which is a ksh script so perhaps 
+#    unlinked.path should be a fn also, cause invokation is costly.
+	IT="$1";
+	ULP=`ulp $IT`; 
+	# check for DOESN'T exist;
+	if [ -z "$ULP" ] ; then 
+		print 'do_ulp file {-e another_cmmd  -pg -ls -vi -VI -cat -sum -rlog -file  }'
+	else
+		print "Unlinked path is a $TRUE_TYPE \t${ULP}"
+	fi;
+	if [ ! -z "$2" ] ; then
+		case $2 in 
+		-df)   /bin/df -kl   $ULP;;
+		-pg)   $PAGER        $ULP;;
+		-ls)   ls -ldF       $ULP;;
+		-vi)   vi            $ULP;;
+		-VI)   $VI           $ULP;;
+		-cat)  cat           $ULP;;
+		-sum)  cksum         $ULP;;
+		-rlog) rlog          $ULP;;
+		-file) file          $ULP;;
+		-e)    $3            $ULP;;
+		*)    print "dont know how to do $2";;
+		esac;
+	fi
+}
+
+ump() { #set -x; 
+        #give the UnMounted Path for the paths, like ulp but
+				#additionally takes into account local mounts, ie. a dir on a dir....
+#HEREIS the awk script; 
+#       nb. typeset keeps it local to this fn
+#       nb. the "" stops variable interpolation. That's nice to store the awk
+#           script WITHIN the ksh fn....
+typeset UMP_AWK=$(cat <<""!EOF!
+BEGIN {
+	DFK="df -kF lofs";  while (DFK | getline ) lofs[$6]=$1; close(DFK); 
+}
+	{  #Match all lines.....
+		split($0, paths);       #printf "Doing %s\n", $0;
+		for (p in paths) {
+##			printf "Ori:%24s  = U Path ", paths[p]; 
+			ump=unmounted_path(paths[p]);
+			printf "%s\n", ump; 
+		}
+	}
+
+function unmounted_path(path, lremainder) { # returns the unmounted path ..
+	lremainder="";
+	do {
+##		printf "\n TRACE path %30s lrem %30s \n", path, lremainder;
+		if (lofs[path]) {
+			return  lremainder ? lofs[path] "/" lremainder : lofs[path]; 
+		}
+		lremainder=lremainder ? basename(path) "/" lremainder : basename(path);
+		path=ancest_path(path)
+	} while (path != "" && path ~ "/") 
+	return  lremainder ? path "/" lremainder : path; 
+}
+
+function ancest_path(path) {  # returns the ancestor path ie /a/b for  /a/b/c
+	junk=sub("/[^/]*$", "", path);   return path;
+}
+
+function basename(path) {  # returns the basename of path ie c for  /a/b/c
+	junk=sub("^.*/", "", path);      return path;
+}
+!EOF!
+);
+
+##	print "$UMP_AWK";
+	print $* | nawk "$UMP_AWK"
+}
+
+
+path_from_inc() {
+typeset USAGE='
+NAME
+  path_from_inc()    - creates a $PATH -like env.var. from a cpp line
+                       by constructing from the -I.... args
+SYNOPSIS
+  path_from_inc  gcc -DBLA -I./inc -I/usr/include/blabla ... myprog.c
+SEE ALSO
+  search_path()
+';
+
+	if [ -z "$1" ] ; then print "$USAGE"; fi;
+	PATH_FROM_INC="";
+	typeset arg arg_post P="";
+	for arg in $*; do 
+		arg_post=${arg##-I}
+		if [ "$arg_post" != "$arg" ]; then
+			P="$P:$arg_post";
+		fi
+	done
+	PATH_FROM_INC=${P#:};
+	print "$PATH_FROM_INC";
+}
+
+path_to_list() { #Convert a $PATH-like to a list suitable for /bin/find etc.
+	PATH_TO_LIST=$(print $1|sed 's/:/ /g')
+	print $PATH_TO_LIST
+}
+
+unalias cstd; alias cstd="cksumtree_diff";
+cksumtree_diff() { #set -x;
+	if [ -z "$2" ] ; then
+		print "cksumtree_diff: Usage cksumtree_diff path1 path2"; return 22;
+	fi
+
+	_CD_SRC="$1";
+	_CD_DST="$2";
+	_CD_TMP_LOC="/tmp";
+	_CD_SRC_TMP="$_CD_TMP_LOC/cksumtree.diff.$$.path.1.${_CD_SRC##*/}";
+	_CD_DST_TMP="$_CD_TMP_LOC/cksumtree.diff.$$.path.2.${_CD_DST##*/}";
+
+	print "Getting src cksum tree for $_CD_SRC";
+	(cd $_CD_SRC; find . -print | sort | xargs cksum > $_CD_SRC_TMP);
+	print "Getting dst cksum tree for $_CD_DST";
+	(cd $_CD_DST; find . -print | sort | xargs cksum > $_CD_DST_TMP);
+
+	(
+	 if [ ! -z "$CLEARCASE_ROOT" ] ; then
+		cleartool setcs -current;
+		print "Using config spec ---"; cleartool catcs; print "\n---\n";
+	 fi;
+
+	print "Here are the differences in the cksums of the directories";
+	print "'(<)' $_CD_SRC   -- and   -- 
+'(>)' $_CD_DST";
+	diff  $_CD_SRC_TMP  $_CD_DST_TMP; 
+	)    # | $PAGER   # best to leave the pager piping to the user.....
+}
+
+save_modes_tree() { #set -x;  # Requires a named path, no '.'
+	typeset tree=${1:-$PWD};
+	typeset treename=$(print $tree | sed 's,/,___,g');
+	typeset treefilename="$HOME/.restore.modes/$treename";
+
+	print "save_modes_tree: For tree $tree";
+	typeset allfiles=$(find $tree -print);
+	save                      $treefilename 2>/dev/null;
+	restore_modes $allfiles > $treefilename
+	chmod 777                 $treefilename
+}
+
+restore_modes_tree() {
+	typeset tree=${1:-$PWD};
+	typeset treename=$(print $tree | sed 's,/,___,g');
+	typeset treefilename="$HOME/.restore.modes/$treename";
+
+	print "restore_modes_tree: For tree $tree";
+	$treefilename;
+}
+
+open_modes_tree() {
+	typeset tree=${1:-$PWD};
+	typeset tree_dirs tree_files;
+
+	save_modes_tree $tree
+	chmod -R ugo+r  $tree;                      # Make ALL FILES ALL Readable
+	tree_dirs=$(find $tree  -type d -print); 
+	chmod ugo+x $tree_dirs;                     # Make ALL DIRS  ALL Executable
+	tree_files=$(find $tree -type f -print);    # Make if I can -x ALL can -x
+	for afile in $(print $tree_files); do 
+		if [ -x $afile ] ; then 
+			chmod go+x $afile; 
+		fi
+##		if [ -w $afile ] ; then chmod go+w $afile; fi
+  done
+}
+
+lastfile() {
+	# Eg. view $(lastfile)
+	LASTFILE=$(ls -art ${1}*| tail -1); 
+	echo $LASTFILE
+}
+
+mvAndLn() {
+#  Directory MY_ADDITIONAL_HOME_DIRS is a symlink to another HOME directory
+#  This fn() moves a directory from my true home there and creates a symlink
+#  to it. 
+##	set -x;
+	for mdir; do
+		mv   $mdir  MY_ADDITIONAL_HOME_DIRS;
+		ln -s       MY_ADDITIONAL_HOME_DIRS/$mdir $mdir;
+	done
+}
+
+reportMoved() {
+	typeset MOVED=$(ls -l | grep MY_ADDITIONAL_HOME_DIRS | awk '{print $9}' | grep -v MY_ADDITIONAL_HOME_DIRS);
+	print "MOVED are " 1>&2;
+	print "$MOVED";
+}
+
+
+cpNewerVersionAtOtherPaths() {
+	typeset CP_NEWER_VERS_NAWKSCRIPT=' function usage() {
+  ME="cpNewerVersionAtOtherPaths.awk";
+  printf "NAME\n";
+	printf "  %s - Creates a list of cp commands to upgrade files OF-THE-SAME-FILENAME\n", ME;
+	printf "SYMNOPSIS\n";
+	printf "  %s NewerPathsFile OlderPathsFile\n", ME;
+	printf "  NewerPathsFiles is a text file holding a one-filename-per-line list of \n";
+	printf "                  full-path-specs of the newer versions of files\n";
+	printf "  OlderPathsFiles is a text file holding a one-filename-per-line list of \n";
+	printf "                  full-path-specs of the older versions of files\n";
+}
+
+BEGIN { 
+	if (ARGC < 3) { 
+		printf "%s: ERROR: Insufficient Args: %d\n", ME, ARGC; 
+		usage();
+		exit 2;
+	}
+
+	newerListFile=ARGV[1]
+	CAT_IT="/bin/cat " newerListFile;
+	while (CAT_IT | getline line >0) {
+		numDirs=split(line, dirs, "/");
+		bn=dirs[numDirs];
+		printf "# %s: %s: %s\n", newerListFile, bn, line;  
+	  to[bn]=line;
+	}
+
+	OlderListFile=ARGV[2]
+	CAT_IT="/bin/cat " OlderListFile;
+	while (CAT_IT | getline line >0) {
+		numDirs=split(line, dirs, "/");
+		bn=dirs[numDirs];
+		if (to[bn]) {
+			printf "cp -pf \"%s\" \"%s\"  \n", to[bn], line;
+		}
+	}
+
+}
+END { 
+	printf "# -- Ending --\n";
+}
+'
+
+
+typeset GAWK_SCRIPT=<<END_OF_AWK
+function usage() {
+  ME="cpNewerVersionAtOtherPaths.awk";
+  printf "NAME\n";
+	printf "  %s - Creates a list of cp commands to upgrade files OF-THE-SAME-FILENAME\n", ME;
+	printf "SYMNOPSIS\n";
+	printf "  %s NewerPathsFile OlderPathsFile\n", ME;
+	printf "  NewerPathsFiles is a text file holding a one-filename-per-line list of \n";
+	printf "                  full-path-specs of the newer versions of files\n";
+	printf "  OlderPathsFiles is a text file holding a one-filename-per-line list of \n";
+	printf "                  full-path-specs of the older versions of files\n";
+}
+
+BEGIN { 
+	if (ARGC < 3) { 
+		printf "%s: ERROR: Insufficient Args: %d\n", ME, ARGC; 
+		usage();
+		exit 2;
+	}
+
+	newerListFile=ARGV[1]
+	CAT_IT="/bin/cat " newerListFile;
+	while (CAT_IT | getline line >0) {
+		numDirs=split(line, dirs, "/");
+		bn=dirs[numDirs];
+		printf "# %s: %s: %s\n", newerListFile, bn, line;  
+	  to[bn]=line;
+	}
+
+	OlderListFile=ARGV[2]
+	CAT_IT="/bin/cat " OlderListFile;
+	while (CAT_IT | getline line >0) {
+		numDirs=split(line, dirs, "/");
+		bn=dirs[numDirs];
+		if (to[bn]) {
+			printf "cp -pf \"%s\" \"%s\"  \n", to[bn], line;
+		}
+	}
+
+}
+END { 
+	printf "# -- Ending --\n";
+}
+END_OF_AWK
+
+	gawk "$CP_NEWER_VERS_NAWKSCRIPT" $1 $2 >/tmp/cpNewerVers_$$.ksh
+	chmod +x /tmp/cpNewerVers_$$.ksh
+	ksh -x   /tmp/cpNewerVers_$$.ksh 2>&1 | tee  /tmp/cpNewerVers_$$_Trace.txt
+}
+
+checkSumsOfDupPaths() { # $1 is the filename of file containing one full-path-spec per line
+# Get's the chsum of each file, and then (visually) compares on basename of each.
+	cat $1 | sed 's,^,cksum ",' | sed 's,$,",' > /tmp/getSums
+	chmod +x /tmp/getSums; /tmp/getSums        > /tmp/Sums
+
+	for newfile in $(awk '{print $1}' /tmp/ver7Conv );do 
+		echo; 
+		echo NEWFILE: $newfile; 
+		echo; 
+		grep "/$newfile$" /tmp/Sums; 
+	done > /tmp/verChecks
+
+	echo Does /tmp/verChecks Look Good. All old files of the same cksum...; 
+}
+
+
+
+
+

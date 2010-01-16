@@ -1,0 +1,530 @@
+# File             $HOME/.kshrc.dns_and_nis 
+# Descirption      .kshrc. file for general networking esp. nis dns
+
+
+ #####   #    #   ####           #    #     #     ####
+ #    #  ##   #  #               ##   #     #    #
+ #    #  # #  #   ####           # #  #     #     ####
+ #    #  #  # #       #          #  # #     #         #
+ #    #  #   ##  #    #          #   ##     #    #    #
+ #####   #    #   ####           #    #     #     ####
+
+# ! Use NETHOME to access your TRUE $HOME on remote machines......
+NETHOME="/net/cosf00/home/eea/eeaharg";   export NETHOME
+
+##alias xbiff="/usr/openwin/bin/xbiff -file /home/is/hargream/Mailbox -bg black -fg yellow -update 20&"
+##alias winman="nohup /home/app/tvtwm/tvtwm -f /home/is/hargream/.twmrc -s -q -v&";
+
+#Not sure how to bring this outta the maps....
+# Q/  How to get a list of available netgroups ??
+#
+ng=$($AWK '/^[A-z]* / {print $1}' $HOME/.netgroup) # .epa.all, .dns.nis
+
+##dnsdom="epa.ericsson.se";  # q. discover from grep domain /etc/resolv.conf 
+##dnsdom=$(print "exit" | nslookup -all | awk -F= '/domain=/ {print $2}');
+dnsdom="none-FIXME"
+dnsmaster="p0101.reece.com.au";  
+
+nsm() {  #$TRACING;  # NSlookup Match
+	typeset dnsdomLS=$(print "ls $dnsdom" | nslookup - $dnsmaster);
+	typeset NSM_HOST   NSM_ADDR    NSM_BOTH   DO_REV   nsmhost   nsmaddr;
+
+	if [ "x$1" = "x-r" ] ; then
+		typeset DO_REV="true"; shift;
+	fi
+
+	for nsmhost; do
+		if [ -z "$DO_REV" ] ; then
+			NSM=$(print "$dnsdomLS" | grep "$nsmhost");     # Any Match
+			print "$NSM";
+		else
+			NSM_BOTH=$(print "$dnsdomLS" | grep "^ $nsmhost ");  # Name To Address
+			# gotta do MULTIPLE matches here, ie. loop on the results | read NSM_BOTH
+			NSM_ADDR="${NSM_BOTH## $nsmhost }";
+			NSM_ADDR="${NSM_ADDR#* }";
+			NSM_DIAGS=$(print "$NSM_ADDR" | nslookup 3>&1 1>/dev/null 2>&3 | tail -1);
+			NSM_DIAGS=${NSM_DIAGS:-"OK"};
+			print "$nsmhost :: $NSM_ADDR :: $NSM_DIAGS"; 
+		fi
+	done
+}
+
+hm() {  #?match supplied regexp as NIS hostname
+	typeset NISHOSTS=$(ypcat hosts);
+	typeset host;
+	for host; do
+		HM=$(print "$NISHOSTS" | grep "$host"); 	
+		print "$HM";
+	done
+}
+
+# What about netgroup expansion for users NOT hosts....
+# Should have ONE of each, ip and user ....
+netgroup() { #$TRACING; # prints a (recursively) expanded list of member ip's
+	typeset NG_groupname;
+	typeset NG_memberlist;
+	typeset NG_member;
+	typeset NG_SED_STRIP='s/(//g
+s/)//g
+s/,-,//g
+s/,//g';
+
+	for NG_groupname in $*; do 
+		NGmemberlist=$(ypmatch $NG_groupname netgroup); 
+		for NGmember in $NGmemberlist; do 
+			if [ "$NGmember" != "${NGmember##*,}" ] ; then
+				 print "$NGmember" | sed -e "$NG_SED_STRIP";
+			else
+				netgroup $NGmember;
+			fi
+		done;
+	done
+}
+
+pingnetgroup() { #$TRACING;
+	typeset -R25 ip;
+	for ip in $(netgroup $*); do
+		print "Trying $ip:\c"; /usr/sbin/ping $ip 2; 
+	done
+}
+
+ypp() { # Match the printers in printers.conf.byname giving name
+	typeset match="$1";
+	ypcat printers.conf.byname | nawk -F: "/^$match/"'{print $1}'
+}
+
+  ###   ######
+   #    #     #
+   #    #     #
+   #    ######
+   #    #
+   #    #
+  ###   #
+
+
+ #    #  ######   #####  #    #   ####   #####   #    #
+ ##   #  #          #    #    #  #    #  #    #  #   #
+ # #  #  #####      #    #    #  #    #  #    #  ####
+ #  # #  #          #    # ## #  #    #  #####   #  #
+ #   ##  #          #    ##  ##  #    #  #   #   #   #
+ #    #  ######     #    #    #   ####   #    #  #    #
+
+
+   ##    #####   #####   #####   ######   ####    ####
+  #  #   #    #  #    #  #    #  #       #       #
+ #    #  #    #  #    #  #    #  #####    ####    ####
+ ######  #    #  #    #  #####   #            #       #
+ #    #  #    #  #    #  #   #   #       #    #  #    #
+ #    #  #####   #####   #    #  ######   ####    ####
+
+
+
+
+######
+#     #  #####    ####   #####   #       ######  #    #   ####
+#     #  #    #  #    #  #    #  #       #       ##  ##  #
+######   #    #  #    #  #####   #       #####   # ## #   ####
+#        #####   #    #  #    #  #       #       #    #       #
+#        #   #   #    #  #    #  #       #       #    #  #    #
+#        #    #   ####   #####   ######  ######  #    #   ####
+
+# What about DOT    format 146.11.a.b
+# What about CONCAT format ffffff00
+# Using the netmask convention of 10.20.100.200/25
+# Giving Mode A, B, C networks ... CORRECTLY
+# Tidy Up these names so they are consistent
+
+
+# Provide Fns to 
+# o dec <-> hex <-> bin
+# o Determine what 'Class' address it is
+# o Interpret the NetMask, showing what the addr range is for hosts ....
+# o etc. etc. etc.
+# o 
+# o Functions
+#   dec2bin()                12   -> 1100
+#   bin2dec()                1100 -> 12
+#   hex2dec()                ff   -> 256
+#   bin_inv()                1100 -> 0011
+#   bin_zerofill()           1100 -> 00001100
+#   bin_operator()     xor   1100 1010 -> 0110
+#   bin_xor()                1100 1010 -> 0110
+#   bin_or()                 1100 1010 -> 1110
+#   bin_and()                1100 1010 -> 1000
+#   bin_mask()               1100 1010 -> 1000
+#   base10_binfn             performs a binary fn on a base10 number
+#   base10_mask()            12 10     -> 8
+#   base10_xor()             12 10     -> 6
+#   base10_or()              12 10     -> 14
+#   base10_and()             12 10     -> 8
+#   base10_inv()             255       -> 1
+#   ip_normalise()           146.11.84.115 -> 146:11:84:115
+#   ip_bin2dec()             00001010:00010100:01100100:11001000 -> 010:020:100:200
+#   ip_dec2bin()             010:020:100:200 -> 00001010:00010100:01100100:11001000 
+#   ip2dec()                 000.000.001.002 -> 258
+#   dec2ip()                 258 -> 000.000.001.002 
+#   ip_base10_binfn()   and  146:11:84:115 255:255:255:0 -> 146:11:84:0
+#   ip_base10_mask()         146:11:84:115 255:255:255:0 -> 146:11:84:0
+#   ip_base10_xor()          
+#   ip_base10_or()           
+#   ip_base10_and()          146:11:84:115 255:255:255:0 -> 146:11:84:0
+#   ip_print()   d|h|b|all   146.11.84.115
+#   network()                ip_addr netmask -> all details of addressing 
+#   
+#   
+#   
+
+dec2bin() { # number
+# Takes a number and returns (prints) the bits
+	typeset    bits;
+	typeset -i number;
+	for number; do
+		bits="";
+		while  [ $number != 0 ] ; do
+			bit=$(($number % 2));
+			bits="$bit$bits";
+			number=$(($number / 2));
+		done;
+		print "${bits:-0}";
+	done;
+}
+
+bin2dec() { # bits
+# Takes a string which is a sequence of bits and returns the unsigned-number
+	typeset    bits msb remainder;
+	typeset -i number;
+	for bits; do
+		number="0";
+		while [ ! -z "$bits" ] ; do 
+			remainder=${bits#?};   msb=${bits%%$remainder};
+			number=$(($number * 2 + $msb));
+			bits=$remainder;
+		done;
+		print "$number";
+	done;
+}
+
+hex2dec() {
+# Takes a string which is a sequence of hexchars and returns the unsigned-number
+	typeset    hexchar msc remainder;
+	typeset -i number msc_dec;
+	for hexchar; do
+		number="0";
+		while [ ! -z "$hexchar" ] ; do 
+			remainder=${hexchar#?};   msc=${hexchar%%$remainder};
+			case "$msc" in
+				0|1|2|3|4|5|6|7|8|9) msc_dec=$msc;;
+				a|A) msc_dec="10";;
+				b|B) msc_dec="11";;
+				c|C) msc_dec="12";;
+				d|D) msc_dec="13";;
+				e|E) msc_dec="14";;
+				f|F) msc_dec="15";;
+			esac;
+			number=$(($number * 16 + $msc_dec));
+			hexchar=$remainder;
+		done;
+		print "$number";
+	done;
+}
+
+bin_inv() {
+	for bin; do
+		print $bin | sed 's,0,l,g;s,1,0,g;s,l,1,g';
+	done
+}
+
+bin_zerofill() {
+##	$TRACING;
+	typeset -x BIN_ZEROFILL_LENGTH="${BIN_ZEROFILL_LENGTH:-8}";
+	typeset BIN_ZEROFILL_AWK='
+	{ l=length($1); 
+	  for (a=l; a<ENVIRON["BIN_ZEROFILL_LENGTH"]; a++) { 
+			printf "0"; 
+		} 
+		print $1; 
+	}'
+	typeset a_bin; for a_bin; do
+		print "$a_bin" | nawk "$BIN_ZEROFILL_AWK";
+	done
+}
+
+bin_operator() { 
+# Takes two binary strings and does a 'bin operator' on the bits
+#Regression Test bin_operator or  1100 0101                                     
+#Regression Test 00001101
+#Regression Test bin_operator and 1100 0101
+#Regression Test 00000100
+#Regression Test bin_operator xor 1100 0101
+
+	typeset bin1_remainder bin1_bits bin1_lsb;
+	typeset bin2_remainder bin2_bits bin2_lsb;
+	typeset bin_result="";
+	typeset BIN_OPERATOR="$1"; shift
+	bin1_bits=$(bin_zerofill "$1");  
+	bin2_bits=$(bin_zerofill "$2"); 
+		while [ ! -z "$bin1_bits$bin2_bits" ] ; do
+			bin1_remainder=${bin1_bits%?};   bin1_lsb=${bin1_bits##$bin1_remainder};
+			bin2_remainder=${bin2_bits%?};   bin2_lsb=${bin2_bits##$bin2_remainder};
+			case "$BIN_OPERATOR$bin1_lsb$bin2_lsb" in
+				xor01|xor10)        bin_result="1${bin_result}";;
+				xor00|xor11)        bin_result="0${bin_result}";;
+				or01|or10|or11)     bin_result="1${bin_result}";;
+				or00)               bin_result="0${bin_result}";;
+				and11)              bin_result="1${bin_result}";;
+				and00|and01|and10)  bin_result="0${bin_result}";;
+			esac;
+			bin1_bits=$bin1_remainder;
+			bin2_bits=$bin2_remainder;
+		done
+		print "$bin_result";
+}
+
+bin_xor() { 
+# Takes two binary strings and does a 'logical XOR' on the bits
+	bin_operator xor $1 $2;
+}
+
+bin_or() { 
+##$TRACING
+# Takes two binary strings and does a 'logical OR ' on the bits
+	bin_operator or $1 $2;
+}
+
+bin_and() { 
+# Takes two binary strings and does a 'logical AND' on the bits
+	bin_operator and $1 $2;
+}
+
+bin_mask() {
+	bin_operator and $1 $2; 
+}
+
+base10_binfn() {
+# Returns (prints) the masked value
+##$TRACING
+	typeset   a2=$(dec2bin $1);
+	typeset   b2=$(dec2bin $2);
+	typeset  ab2=$(${BIN_FN_BASE10:-bin_and} $a2 $b2);
+	bin2dec $ab2;
+}
+
+base10_and() {
+	BIN_FN_BASE10="bin_and"; base10_binfn $1 $2;
+}
+
+base10_mask() {
+##$TRACING
+	BIN_FN_BASE10="bin_and"; base10_binfn $1 $2;
+}
+
+base10_xor() {
+	BIN_FN_BASE10="bin_xor"; base10_binfn $1 $2;
+}
+
+base10_or() {
+##$TRACING
+	BIN_FN_BASE10="bin_or"; base10_binfn $1 $2;
+}
+
+base10_inv() {
+	BIN_FN_BASE10="bin_inv"; base10_binfn $1 $2;
+}
+
+ip_normalise() {
+$TRACING
+	for ip_addr_base10; do
+		ip_addr_base10=$(print $ip_addr_base10 | sed 's/\./:/g');
+		if [ "$ip_addr_base10" = "${ip_addr_base10##*:}" ] ; then
+			ip_addr_base10=$(dec2ip $(hex2dec $ip_addr_base10));
+		fi
+		print "$ip_addr_base10";
+	done
+}
+
+ip_bin2dec() {
+	typeset octet;
+	for ip; do
+		ip=$(ip_normalise $ip);
+		OLDIFS="$IFS"; IFS=":"; set --  $ip;  IFS="$OLDIFS";
+		octet=$(bin2dec $1); printf "%03d:"   $octet;
+		octet=$(bin2dec $2); printf "%03d:"   $octet;
+		octet=$(bin2dec $3); printf "%03d:"   $octet;
+		octet=$(bin2dec $4); printf "%03d\n"  $octet;
+	done
+}
+
+ip_dec2bin() {
+	for ip; do
+		ip=$(ip_normalise $ip);
+		OLDIFS="$IFS"; IFS=":"; set --  $ip;  IFS="$OLDIFS";
+		bits=$(bin_zerofill $(dec2bin $1)); printf "%s:"   $bits;
+		bits=$(bin_zerofill $(dec2bin $2)); printf "%s:"   $bits;
+		bits=$(bin_zerofill $(dec2bin $3)); printf "%s:"   $bits;
+		bits=$(bin_zerofill $(dec2bin $4)); printf "%s\n"  $bits;
+	done
+}
+
+ip2dec() {
+	typeset -i result="0";
+	for ip; do
+		ip=$(ip_normalise $ip);
+		OLDIFS="$IFS"; IFS=":"; set --  $ip;  IFS="$OLDIFS";
+		for octet; do
+			result=$((256 * $result + octet));
+		done
+		print $result;
+	done;
+}
+
+dec2ip() {
+	typeset ip;
+	typeset -i dec;
+	for dec; do
+		ip="";
+		octet=$(($dec % 256)); dec=$((dec / 256)); ip="$octet";
+		octet=$(($dec % 256)); dec=$((dec / 256)); ip="$octet:$ip";
+		octet=$(($dec % 256)); dec=$((dec / 256)); ip="$octet:$ip";
+		octet=$(($dec % 256)); dec=$((dec / 256)); ip="$octet:$ip";
+		print $ip;
+	done
+}
+
+ip_base10_binfn() {
+##$TRACING
+##	print "ip_base10_binfn Using binary fn $IP_BINFN" 1>&2;
+	typeset ip_octet1 ip_octet2 ip_octet3 ip_octet4;
+	typeset nm_octet1 nm_octet2 nm_octet3 nm_octet4;
+	typeset nw_octet1 nw_octet2 nw_octet3 nw_octet4;
+
+	typeset ip_addr_base10="$1"; 
+	typeset netmask_base10="$2";
+
+	ip_addr_base10=$(ip_normalise $ip_addr_base10);
+	OLDIFS="$IFS"; IFS=":"; set --  $ip_addr_base10;  IFS="$OLDIFS";
+	ip_octet1="$1";
+	ip_octet2="$2";
+	ip_octet3="$3";
+	ip_octet4="$4";
+
+	netmask_base10=$(ip_normalise $netmask_base10);
+	OLDIFS="$IFS"; IFS=":"; set --  $netmask_base10;  IFS="$OLDIFS";
+	nm_octet1="$1";
+	nm_octet2="$2";
+	nm_octet3="$3";
+	nm_octet4="$4";
+
+	nw_octet1=$(${IP_BINFN:-base10_mask} $ip_octet1 $nm_octet1);
+	nw_octet2=$(${IP_BINFN:-base10_mask} $ip_octet2 $nm_octet2);
+	nw_octet3=$(${IP_BINFN:-base10_mask} $ip_octet3 $nm_octet3);
+	nw_octet4=$(${IP_BINFN:-base10_mask} $ip_octet4 $nm_octet4);
+
+	printf "%03d:%03d:%03d:%03d\n" $nw_octet1  $nw_octet2  $nw_octet3  $nw_octet4  ;
+}
+
+ip_base10_mask() {
+##$TRACING
+	export IP_BINFN="base10_mask";  ip_base10_binfn $1 $2;
+}
+
+ip_base10_xor() {
+	IP_BINFN="base10_xor";  ip_base10_binfn $1 $2;
+}
+
+ip_base10_or() {
+	IP_BINFN="base10_or";  ip_base10_binfn $1 $2;
+}
+
+ip_base10_and() {
+	IP_BINFN="base10_and";  ip_base10_binfn $1 $2;
+}
+
+ip_print() {  # f ip
+# Usage:     Prints out an IP address in format a:b:c:d
+# Synopsis:  ip_print format ip_string
+#              Where format is either x=hexadecimal, d=decimal, b=binary
+#              and ip_string is "aaa:bbb:ccc:ddd"
+#            Accepts input of the ip_addr in any of these forms
+#              o ddd:ddd:ddd:ddd  (one-zero-fill char allowed)
+#              o ddd.ddd.ddd.ddd  (one-zero-fill char allowed)
+#              o xxxxxxxx         (zero-fill hex char's without separators)
+#              o
+##$TRACING
+	typeset format="$1"; shift;
+	for ip; do
+		ip=$(print $ip | sed 's/\./:/g');
+		OLDIFS="$IFS"; IFS=":"; set --  $ip;  IFS="$OLDIFS";
+		case $format  in
+			d|D)    FORMAT="%03d:%03d:%03d:%03d\n";printf $FORMAT ${1##0} ${2##0} ${3##0} ${4##0};;
+			x|X)    FORMAT="%02x:%02x:%02x:%02x\n";printf $FORMAT ${1##0} ${2##0} ${3##0} ${4##0};;
+			b|B)    FORMAT="%03b:%03b:%03b:%03b\n";
+							bits=$(bin_zerofill $(dec2bin $1)); printf "%s:"   $bits;
+							bits=$(bin_zerofill $(dec2bin $2)); printf "%s:"   $bits;
+							bits=$(bin_zerofill $(dec2bin $3)); printf "%s:"   $bits;
+							bits=$(bin_zerofill $(dec2bin $4)); printf "%s\n" $bits;;
+			all)    typeset ip_d ip_x ip_b;
+							ip_d=$(ip_print d $ip);
+							ip_x=$(ip_print x $ip);
+							ip_b=$(ip_print b $ip);
+							print "$ip_d \t $ip_x \t $ip_b";
+							;;
+			*)      print "Usage ip_print all|d|x|b  aaa:bbb:ccc:ddd"; return; ;;
+		esac;
+	done;
+}
+
+
+network() { # ip-address netmask
+##$TRACING; 
+#Usage:     Prints out the network characteristics for a given IP-address and netmask pair
+	while [ ! -z "$1" ] ; do
+		typeset   ip_addr_base10="$1"; shift;
+		typeset   netmask_base10="$1"; shift;
+
+		typeset     network_part=$(ip_base10_mask $ip_addr_base10    $netmask_base10);
+		typeset  hostmask_base10=$(ip_bin2dec $(bin_inv $(ip_dec2bin $netmask_base10)));
+		typeset        host_part=$(ip_base10_mask $ip_addr_base10    $hostmask_base10);
+		typeset   broadcast_addr=$(ip_base10_or   $network_part      $hostmask_base10);
+		typeset      lowest_addr=$(ip_base10_or   $network_part      "000:000:000:01");
+		typeset     highest_addr=$(ip_base10_and $(ip_base10_or  $network_part $hostmask_base10) "255:255:255:254");
+
+		print "IP        Addr  - \c"; ip_print all $ip_addr_base10;
+		print "Net       Mask  - \c"; ip_print all $netmask_base10;
+		print "Host      Mask  - \c"; ip_print all $hostmask_base10;
+		print "NetWork   Addr  - \c"; ip_print all $network_part;
+		print "Host      Addr  - \c"; ip_print all $host_part;
+		print "Broadcast Addr  - \c"; ip_print all $broadcast_addr;
+		print "Lowest    Addr  - \c"; ip_print all $lowest_addr;
+		print "Highest   Addr  - \c"; ip_print all $highest_addr;
+
+		typeset -i ClassIndicator=${ip_addr_base10%%:?*};
+		typeset Class;
+		  if  [   0 -le $ClassIndicator ] && [ $ClassIndicator -le 126 ] ; then Class='A';
+		elif  [ 127 -le $ClassIndicator ] && [ $ClassIndicator -le 127 ] ; then Class='LoopBack';
+		elif  [ 128 -le $ClassIndicator ] && [ $ClassIndicator -le 191 ] ; then Class='B';
+		elif  [ 192 -le $ClassIndicator ] && [ $ClassIndicator -le 223 ] ; then Class='C';
+		elif  [ 224 -le $ClassIndicator ] && [ $ClassIndicator -le 255 ] ; then Class='D_or_E_Experimental';
+		else																														        Class='Unknown';
+		fi;
+		typeset Size=$(ip2dec $hostmask_base10);
+		print "Class '$Class' Network subnetted into $Size addresses"; 
+		case "$Class" in
+			A) print "Class A (  0..126) nnn:hhh:hhh:hhh 17 millions hosts in each       127 networks.  All  allocated.";
+			;;
+			B) print "Class B (128..191) nnn:nnn:hhh:hhh      65,534 hosts in each    16,382 networks.  Most allocated.";
+			;;
+			C) print "Class C (192..223) nnn:nnn:nnn:hhh         254 hosts in each 2 million networks. ";
+			;;
+			LoopBack) print "The LoopBack Class";
+			;;
+			D_or_E_Experimental) print "Class D and E are Experimental ";
+			;;
+			Unknown) print "Unknown Class ";
+			;;
+			*) print "Failed Calculating the network Class ";;
+		esac;
+	done
+}
+##		else #[ 129 -le $ModeIndicator && $ModeIndicator -le 256 ] ; 
+
+

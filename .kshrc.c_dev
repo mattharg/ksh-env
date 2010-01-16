@@ -1,0 +1,437 @@
+#
+# $HOME/.kshrc.c_dev  - Configured for RBAU
+#
+
+LCALL=C
+LC_ALL=C
+LC_COLLATE=C
+LC_CTYPE=C
+LC_MESSAGES=C
+LC_MONETARY=C
+LC_NUMERIC=C
+LC_TIME=C
+
+getTags() {  # Create A tags file at the CWD for all C files in the sub-tree.
+	typeset AllFiles=$(find . -name '*.c' -print -o -name '*.h' -print)
+	ctags --declarations --globals --defines --typedefs --members  $AllFiles  >tags.Errors  2>&1
+}
+
+
+# NOT USING LCLINT....
+##export LARCH_PATH="$HOME/lclint-2.5q/lib";   # LClint env.var.
+##export LCLIMPORTDIR="$HOME/lclint-2.5q/imports";
+##alias lclint="$HOME/lclint-2.5q/bin/lclint";
+##alias lsviewprivate=" cleartool ls -view_only -recurse | grep -v CHECKEDOUT";
+
+include_files() {
+	path_from_inc $*               1>&2;
+	path_to_list  $PATH_FROM_INC   1>&2;
+	INCLUDE_FILES=$(find $PATH_TO_LIST -print);
+	print "$INCLUDE_FILES";
+}
+
+# Hand C code printing...
+##P()   { a2ps           $* | lp; }    # Std
+##P1()  { a2ps     -1 -p $* | lp; }    #
+##Pw()  { a2ps -l -1 -F9 $* | lp; }    #
+##Pww() { a2ps     -l -1 $* | lp; }    #
+
+pc() {
+	for each; do
+		print "Printing $each";
+		/bin/expand -2 $each | vgrind - -h "$each" |  /usr/lib/lp/postscript/dpost -n2 | lp -d mcjd25;
+	done;
+}
+
+# May do something like this later on..............
+##vim() {
+##	(export SHELL="/bin/ksh -p "; 
+##	 export EDITOR="gvim -f" ; 
+##	 vi $*)
+##}
+
+usrlocalvim() {
+	set -x;
+	(export SHELL="/bin/ksh -p";
+	 export VIMRUNTIME=/usr/local/share/vim/vim58;
+	 /usr/local/bin/vim  $*
+	) ;
+}
+
+vimlinuxxterm() {
+	echo Works  nicely for a green/black xterm under linux.
+	echo Keep  colour syntax highlighting and some speed from remote connections
+	(export SHELL="/bin/ksh -p";
+		export VIMRUNTIME=/opt/local/share/vim/vim60;
+		/opt/local/bin/vim $*) ;
+}
+
+usrlocalgvim() {
+	set -x;
+	(export SHELL="/bin/ksh -p";
+	 export VIMRUNTIME=/usr/local/share/vim/vim58;
+	                   /usr/local/bin/gvim -reverse $*
+	) ;
+}
+
+defines_from_cpp() {
+	for arg in $*; do 
+		arg_post=${arg##-D}
+		if [ "$arg_post" != "$arg" ]; then
+DEFINES_FROM_CPP="$DEFINES_FROM_CPP
+$arg_post";
+		fi
+	done
+	print "$DEFINES_FROM_CPP";
+}
+
+cico() { #set -x;
+	for each; do 
+		cleartool ci             -nc $each;
+		if [ "$?" = "0" ] ; then
+			cleartool co -unreserved -nc $each; 
+		else
+			print "cico():  No need to CO again.";
+		fi
+	done
+}
+cicoall() { #set -x;
+	typeset all=$(cleartool lsco -short);
+	cico $all;
+}
+
+sorted_diff() {
+##set -x;
+# Enhancement Ideas:
+#   o filter out blank lines  (sed script)
+#   o filter out blank chars at end of all lines  (sed script)
+#   o allow options filter to sort, eg. a pretty printer etc.
+#
+  typeset fl1="/tmp/sd.1.$$";
+  typeset fl2="/tmp/sd.2.$$";
+  typeset fl3="";
+  typeset diff="sdiff -s";
+  typeset diffpost="";
+
+	if [ -z "$1" ];  then 
+		print "sorted_diff file1 file2 {-cmmd diff -flag} {-get1|-get2|file3}"; 
+		return; 
+	fi
+	if [ ! -r "$1" ] ; then print "sorted_diff(): Error: Cant read file:$1.  Aborting"; return; fi
+  sort $1 >$fl1; shift;
+	if [ ! -r "$1" ] ; then print "sorted_diff(): Error: Cant read file:$1.  Aborting"; return; fi
+  sort $1 >$fl2; shift;
+
+  while [ ! -z "$1" ] ; do
+      if [ "$1" = "-cmmd" ] ; then                 shift; diff="$1"; shift; 
+    elif [ -f "$1" ] ;         then sort "$1">$fl3; shift; diff="diff3"; fl3="/tmp/sd.3.$$";
+    elif [ "$1" = "-get1" ] ; then                 shift;
+      diffpost=" | grep '^<' | sed 's,^< ,,g'"; diff="diff";
+    elif [ "$1" = "-get2" ] ; then                 shift;
+      diffpost=" | grep '^>' | sed 's,^> ,,g'"; diff="diff";
+		else print "sorted_diff(): Error: don't understand flag:$1.  Aborting"; return; fi
+  done
+
+  eval "$diff   $fl1 $fl2 $fl3   $diffpost";
+  /bin/rm $fl1 $fl2 $fl3;
+}
+
+alias vdiff="/apps/*bin/tkdiff_1.1";
+alias studio="/apps/bin/dstudio2001a";
+
+
+# P r o j e c t  RBAU
+#====================
+
+RBAU() {
+	export QPATH="/cygdrive/d/Program Files/PRQA/QAC-5.0.1";  
+	export QACBIN=$QPATH/bin
+	export QACHELPFILES=$QPATH/help
+	export QACOUTPATH=$HOME/tmp
+	add_path PATH "$QPATH";
+	# QAC appl needs dos style path descriptors -write a fn() to do this....
+	export QPATH="D:\\Program Files\\PRQA\\QAC-5.0.1";  # NB: the appl needs this final '/'
+	export QACBIN=$QPATH\\bin;
+	export QACHELPFILES=$QPATH\\help;
+	export QACOUTPATH=D:\\home\\mattharg\\tmp;
+
+	export MYQAC="qac -via D:\home\mattharg\.QA_C_MattsStd.p_a \
+	                  -via D:\home\mattharg\.QA_C_MattsStd.p_s \
+										-via D:\home\mattharg\.QA_C_MattsStd.p_c ";
+}
+
+
+
+
+
+
+# P r o j e c t GCP
+#=================
+
+BICCRP() {
+	CSH_ENV='
+	setenv WINEDITOR "/bin/vi";
+	setenv CCASE_MAKE_COMPAT "gnu";
+	setenv MAKEFLAGS "-R -r";
+	setenv OTHER_WS "mcsw459 ";
+	setenv TOOLBOX "garp_r1a";   #GEE I AM GUESSING HERE
+	setenv BLD_DIR "/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim";
+	setenv SRC_DIR "/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/subunits/BIRPHR";
+	';
+	cd /vobs/prototyping
+	print "CM_PROJ is $CM_PROJ";
+	WINEDITOR="/bin/vi";        #I Don't like using anything BUT vi!
+	CCASE_MAKE_COMPAT="gnu";
+	MAKEFLAGS="-R -r";
+	OTHER_WS="mcsw459 ";
+	export TOOLBOX="garp_r1a";   #GEE I AM GUESSING HERE
+	BLD_DIR="/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim";
+	SRC_DIR="/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/subunits/BIRPHR";
+	alias src="cd $SRC_DIR";
+	alias bld="cd $BLD_DIR";
+	alias fixConf="echo 'block birphr /vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim/birphr.so 2' >> razorsim.conf";
+	GARPENVVARS="/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/subunits/BIRPHR/garp.ksh.dot_me";
+	print "Sourcing $GARPENVVARS"; '.' $GARPENVVARS;
+	print "Setting SEA Env. Vars."; 
+	export RP_183_REPOSITORY=/vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim/sea;
+	export EMULOCALHOME=/proj/capc8/tools/STNlatest;
+	export SEA_XML_LIBPATH=/proj/capc8/tools/SEA/xmlfiles;
+
+	export MANPATH=/vobs/prototyping/BICC_ON_RP/tools/garp_r1a/man:$MANPATH;
+	print "make    Using mmake()   ";
+	print "run     Using ./razorsim -r GARP"; 
+	print "debug   Using ./start_gdb -or- (export SHELL="/bin/sh"; ./matts.start.gdb)"; 
+	print "SEA     Using mstetools()";
+	mstetools() {
+		 (export ENV=""; 
+		 unset ENV; 
+		 export SHELL=/bin/csh; 
+		 csh -x /net/brlw477/export/apps/sun4/stetools/stetools)
+	}
+
+	mmake() {
+		print "\nMatthews make for bi rp hr";
+		export CM_PROJ=/vobs/prototyping/BICC_ON_RP;
+		OLD_DIR=$PWD;
+		cd /vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim;
+		#clearmake;
+		clearmake -U -v -d $*;
+		echo "FIX: birphr.def"; cp ~/biccrp/*.def /vobs/prototyping/BICC_ON_RP/BICCR_CAA204/bin/GARP/razorsim
+		cd $OLD_DIR;
+	}
+
+	gvim() {
+		set -x;
+		(export SHELL="/bin/ksh -p";
+		 export VIMRUNTIME=/opt/local/share/vim/vim60; 
+		 /opt/local/bin/gvim -reverse $*) ;
+	}
+
+##	print "NOT Getting .kshrc.c_dev.GCP";                        #. ~/.kshrc.c_dev.GCP;
+##	print "NOT Getting /apps/apssystem_4.0/lib/profile/profile"; #. /apps/apssystem_4.0/lib/profile/profile;
+##	print "NOT Getting /apps/rpp_r6c/lib/profile/profile";       #. /apps/rpp_r6c/lib/profile/profile;
+
+}
+
+
+# P r o j e c t GCP
+#=================
+
+GCP() {
+	set -x;
+	export CM_PROJ=/vobs/gcp/GCPHRM_APR/GCPH_CNT/
+	export DDS_HELP="
+include /proj/redback/work/epaarki/tc_cn3/text/init
+include /proj/redback/work/epaarki/tc_cn3/text/textaddreq1
+include /proj/redback/work/epaarki/tc_cn3/text/textaddreq2
+include /proj/redback/work/epaarki/tc_cn3/text/textnotrep1
+include /proj/redback/work/epaarki/tc_cn3/text/textmodsubreq1
+";
+
+	MATTS_GCP_CONFIG_SPEC="
+# normal gcp_cn3_cn2base GCP CN2 Base Branch
+element * CHECKEDOUT
+element -file /vobs/gcp/... .../msc30_cn2base_team/LATEST
+element -file /vobs/gcp/... .../msc30_eaa_proj/LATEST -mkbranch msc30_cn2base_team
+element /vobs/gcp/... .../msc30_eaa_proj/LATEST
+element /vobs/gcp/... /main/LATEST -mkbranch msc30_eaa_proj
+element /vobs/gcp/... /main/LATEST
+element * /main/LATEST -nocheckout
+";
+
+	WINEDITOR="/bin/vi"; #I Don't like using anything BUT vi!
+	GCPBaseDir="/vobs/gcp/GCPHRM_APR/GCPH_CNT/GCPHR_CAA204";
+	     GCPHR="/vobs/gcp/GCPHRM_APR/GCPH_CNT/GCPHR_CAA204/subunits/gcphr";
+	TC="/vobs/gcp/GCPHRM_APR/GCPH_CNT/GCPHR_CAA204/bin/RPP/rppsim/TC";
+	alias   tc="cd $TC";
+	alias  src="cd $GCPHR";
+	alias  inc="cd $GCPHR";
+	alias test="cd $GCPBaseDir/bin/RPP/rppsim";
+	alias proj="/proj/redback/teams/epachy/BD/Review/sdl/src";
+
+	IDEAS=' less /proj/redback/teams/epachy/BD/Review/sdl/src/Buffers*
+ less /proj/redback/teams/epachy/BD/Review/sdl/src/CP_RP*
+ xclearcase
+ ';
+
+
+	gvim() {
+		set -x;
+		(export SHELL="/bin/ksh -p";
+		 export VIMRUNTIME=/opt/local/share/vim/vim60; 
+		 /opt/local/bin/gvim -reverse $*) ;
+	}
+
+	cd $GCPHR;
+	print "Getting .kshrc.c_dev.GCP";                        . ~/.kshrc.c_dev.GCP;
+	print "Getting /apps/apssystem_4.0/lib/profile/profile"; . /apps/apssystem_4.0/lib/profile/profile;
+	print "Getting /apps/rpp_r6c/lib/profile/profile";       . /apps/rpp_r6c/lib/profile/profile;
+
+	EXTRA_LDD="/apps/apssystem_4.2/lib/runtime:/apps/ecc_r7c//lib/cmtool/cm:/apps/ecc_r7c//lib/cmtool/external:/usr/atria/lib/:/usr/atria/shlib/:/apps/scs_r5c/lib:/usr/openwin/lib:/apps/scs_r5c/lib:/apps/scs_r5c/lib";
+
+	LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$EXTRA_LDD";
+	ed_path -non-interactive LD_LIBRARY_PATH;   2>/dev/null  
+	freeze_paths;
+
+	# TEXT Encoder / Decoder Development
+	export PROJ="/proj/redback/work/eeaharg/gcptext";
+	export TC="/proj/redback/work/eeaharg/gcptext/TestCases";
+	alias CO="cleartool co -unreserved -nc "
+}
+
+
+# P r o j e c t MGC3
+#====================
+MGC3() {
+MATTS_MGC3_CONFIG_SPEC="# normal ong_main BICC on ONG Project config_spec
+element * CHECKEDOUT
+element * /main/mgc_phase3/eaa/LATEST
+element * /main/eaa/LATEST
+element * MGC_3.1.1_REL -mkbranch eaa
+element /vobs/t-i/network_gateway/implementation /main/LATEST
+element /vobs/t-i/network_gateway/implementation/* /main/LATEST
+element * /main/mgc_phase3/LATEST -mkbranch eaa
+element * /main/LATEST -mkbranch eaa
+";
+
+add_path PATH /opt/SUNWspro/bin
+add_path PATH /opt/sfw/bin
+##add_path PATH /proj/bicc/test/ozPro
+
+alias make="dmake -m serial"; 
+
+	case "$HOSTNAME" in
+		mcsc02|mcsw334|mcsw344)
+			export CRA_SW="/vobs/mgc3_imp/CRA_SW";
+			export MGC_COMPILER_PATH="/opt/SUNWspro/WS6";   # True Solaris cc available
+			export EMANATE_PATH="/opt/snmp";
+			export LM_LICENSE_FILE=7588@`hostname`;
+			;;
+		sip1|sipldap)
+			export CRA_SW="/vobs/mgc3_imp/CRA_SW";
+			export MGC_COMPILER_PATH="/opt/SUNWspro/WS6";   # True Solaris cc available
+			export EMANATE_PATH="/opt/snmp";
+			;;
+		*)
+			print "This host not known for CC/CC";
+			;;
+	esac;
+	print "CRA_SW is $CRA_SW";
+	print "MGC_COMPILER_PATH is $MGC_COMPILER_PATH";
+	TD="/proj/bicc/test/LOCAL72_TDs";
+	alias mgc3="cd $CRA_SW";
+	alias  pkg="cd $CRA_SW/CNA_BICC/CAA_BICC/pkgBicc";
+	alias  src="cd $CRA_SW/CNA_BICC/CAA_BICC/pkgBicc/src";
+	alias  inc="cd $CRA_SW/CNA_BICC/CAA_BICC/pkgBicc/inc";
+	alias test="cd $CRA_SW/CNA_BICC/CAA_BICC/pkgBicc/test";
+	alias   ft="cd /vobs/bicc/BICC_CRT/functions/ft";
+	alias   td="cd $TD";
+
+	gvim() {
+		set -x;
+		(export SHELL="/bin/ksh -p";
+		 export VIMRUNTIME=/opt/local/share/vim/vim60; 
+		 /opt/local/bin/gvim -reverse $*) ;
+	}
+	cd $CRA_SW;
+	print "Getting .kshrc.c_dev.MGC3"; . ~/.kshrc.c_dev.MGC3
+}
+
+
+
+# P r o j e c t SIP
+#==================
+SIP() {
+# Define Some Interactive Helpers
+  if [ "$1" = "on"  ] ; then
+	print "Turning on  proj. SIP environment";
+##	set -x;
+	export CVSROOT="/proj/sip/repository";
+##	export SIP="$HOME/dx/sipaxe/sip"
+	export SIP="/local/home/eeaharg/sip"
+##	export ADAPT="$HOME/dx/sipaxe/sip/additions/cp_adapt";
+	export RPPSIM="/apps/rpp_r6c/lib/rppsim/lib";
+	export VI="/local/bin/vim";  export EDITOR=$VI; #The UN-SHARED-OBJ one....
+	export DEBUG="10";
+##	export SHELL="/bin/ksh -p";
+	alias sip="cd $SIP";
+	alias adapt="cd $ADAPT";
+##	echo "\n\nHave you done a \n/apps/rpp_r6c/LOCAL_INFO/aps-rpp_r6c\n    ??";
+	echo " Some RPP Fixes";
+##	export PATH="/apps/rpp_r6c/bin:/apps/apssystem_4.0/bin:$PATH";
+##	export LD_LIBRARY_PATH="/usr/ucblib:/apps/rpp_r6c/lib/runtime:/apps/apssystem_4.0/lib/runtime:$LD_LIBRARY_PATH";
+	print "Attempting to replace the function of /apps/rpp_r6c/LOCAL_INFO/aps-rpp_r6c";
+	print "Getting the Two profiles bracketed with a 'set -a'";
+	set -a;
+	set > /tmp/pro.check.0.before.$$
+	print "  First - /apps/apssystem_4.0/lib/profile/profile";
+	. /apps/apssystem_4.0/lib/profile/profile
+	print "  Secound -  /apps/rpp_r6c/lib/profile/profile";
+	. /apps/rpp_r6c/lib/profile/profile
+	set > /tmp/pro.check.1.after$$
+	diff 	/tmp/pro.check.0.before.$$ /tmp/pro.check.1.after$$ | 
+	  tee /tmp/pro.check.diff.$$ | grep '^>' | sed 's/^/DIFF-/';
+	set +a;
+	print "PrePending /local/bin to PATH"; export PATH="/local/bin:$PATH";
+	print "Setting TONAME"; export TONAME="Gizmo";
+	print "Setting TOURL";  export TOURL="sip:that@sip3";
+	print "Setting DEBUG to 15"; export DEBUG=15;
+	print "Fixing LD_LIBRARY_PATH"; 
+		export LD_LIBRARY_PATH="/usr/lib:$LD_LIBRARY_PATH"; 
+		ed_path -non-interactive LD_LIBRARY_PATH >/dev/null 2>&1;
+	print "Aliasing rppsim to tcsh -c rppsim";
+##	alias rppsim="echo 'rppsim through the TCSH'; tcsh -c rppsim";
+	rppsim() {
+		echo 'rppsim through the TCSH'; 
+		echo "DEBUG is $DEBUG";
+		(print "\n\n\n";date; print "\n\n\n";  tcsh -c rppsim) 2>&1 | tee -a rppsim.trace
+	}
+	print "Getting the Env Var's that ONLY tcsh get....";
+	export HOSTTYPE=sun4
+	export VENDOR=sun
+	export OSTYPE=solaris
+	export MACHTYPE=sparc
+	export SHLVL=1
+	export HOST=$HOSTNAME
+	export REMOTEHOST=mcpc050.epa.ericsson.se
+	alias DDS="atpath $SIP/rppsim2/bin; dds ../etc/dds_startup_script";
+	MANPATH="/local/man:$MANPATH";
+	export LC_ALL="en_AU";
+	export OSE_HOME="/apps/rpp_r6c/lib/cse/DESFK";
+ 
+elif [ "$1" = "off" ] ; then
+	print "Turning off proj. SIP environment";
+##	set -x;
+	unalias sip adapt;
+	PATH=${PATH##/local/bin:};
+	CVSROOT="";
+	SIP="";
+	CVSROOT="";
+	ADAPT="";
+	DEBUG="";
+else  
+	print "USAGE: SIP() [on|off]";
+fi
+set +x;
+}
+

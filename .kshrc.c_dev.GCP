@@ -1,0 +1,196 @@
+
+# OZ PRO 
+mozpro() {
+	(
+	set -x;
+	export OZPRO_ROOT="/proj/bicc/ong/ozPro";
+	export OZPRO_SS7_HOST
+	if [ -z "$OZPRO_SS7_HOST" ] ; then
+		print "OZPRO_SS7_HOST not set. Returning..."; return
+	fi
+	print "OZPRO_SS7_HOST is $OZPRO_SS7_HOST";
+	export CLASSPATH="$OZPRO_ROOT/classes";
+	export LD_LIBRARY_PATH="/usr/lib:/usr/ucblib:/apps/apssystem_4.1/lib/runtime:/usr/openwin/lib:/usr/dt/lib:/usr/dt/lib:/usr/openwin/lib";
+	print "Calling ozPro"; sleep 2; 
+	csh -x /proj/bicc/ong/ozPro/ozPro
+	)
+}
+
+
+# Functions and Alises for MGC3 development...
+
+export SS7_CP_CONFIGFILE=/proj/bicc/ong/ozPro/config/brmt-test2/cp.cnf
+
+mpstack() {
+	typeset corefile="${1:-core}";
+	pstack $corefile 2>&1 | /var/tmp/c++filt 2>&1 | less
+}
+
+export TLOG="/var/tmp/matt/mgc.truss.log";
+
+alias vtruss="ls -l $TLOG; sleep 2; /var/tmp/c++filt  $TLOG  | less ";
+
+mstatus() {
+	typeset status;
+	print "InterProcess Comms Status"; ipcs -a
+	echo "\n  STATUS  mgcbin and SS7 related processes.\n"
+	PIDS=$(ps -ef | awk '/\
+\.\/mgcbin|\
+\.\/fe|\
+\.\/ife|\
+\.\/ss7|\
+truss|\
+\.\/ss7mgr|\
+\.\/EinSS7LogD\
+/ { print $2 }');
+
+	##TRUSSPIDS=$(pgrep truss);
+	##PIDS="$IPDS $TRUSSPIDS";
+
+	if [ -z "$PIDS" ] ; then
+		print "No MGC Processes Are Running"
+		return 0;
+	else
+		print "Running processes are:$PIDS"
+		ps -fp "$PIDS" 2>/dev/null
+		status="$?";
+		return 1;
+	fi
+} #mstatus
+
+mstop() {
+	echo "\nKilling mgcbin and SS7 related processes.\n"
+	kill -9 `ps -ef | awk '/\
+\.\/mgcbin|\
+\.\/agent|\
+\.\/snmpd|\
+\.\/fe|\
+\.\/ife|\
+\.\/ss7|\
+\truss|\
+\.\/ss7mgr|\
+\.\/EinSS7LogD\
+/ { print $2 }'` > /dev/null 2>&1
+
+	mstatus; typeset status=$(echo $?)
+	if [ "$status" != "0" ] ; then
+		print "mstop: ERROR: Failed to stop some PIDs: status: $status";
+	else
+		print "mstop: INFO: Stopped OK";
+	fi
+}
+
+mstart() {
+	set -x
+	#Remember the old working directory.
+	OLDDIR=`pwd`
+
+	# Read the environmental variables from /opt/LMFmgc/scripts/set-env
+	if test -r /opt/LMFmgc/scripts/set-env
+					then
+									. /opt/LMFmgc/scripts/set-env
+					else
+									echo "\n/opt/LMFmgc/scripts/set-env not found or not readable\n"
+	fi
+
+	#Use libhoard.so
+	#LD_PRELOAD="/usr/lib/libCrun.so.1 /usr/lib/libpthread.so /usr/lib/libthread.so /usr/lib/librt.so.1 /opt/LMFmgc/libhoard.so"
+	#export LD_PRELOAD
+
+	#Start the MGC with logging to the /var/mgc/mgc.log file
+	cd /opt/LMFmgc
+	save mgclog.log
+	#./mgcbin ./libSCS.so -l ROLL:1d,/var/mgc/mgc.log
+
+	echo "Stopping...."; mstop
+	set -x;
+	$PREAMBLE  ./mgcbin ./libSCS.so 2>&1 | tee mgclog.log
+
+	#Go back to old working directory.
+	cd $OLDDIR
+
+	#Thats it!
+}
+
+alias mclean="mstatus; mstop; mstatus";
+alias mrestart="mclean;  mstart";
+
+mtruss() { 
+	set -x;
+	ULIST=$(  \cd  $PWD/MODULES;  echo *.so | sed 's,\.so,,g'|sed 's/ /,/g')
+	save $TLOG;
+
+	mclean;  sleep 4;
+##	(export PREAMBLE="truss  -f -a  -i -l  -u $ULIST -u libBICC:: -t !lseek,read,write  -o $TLOG"; mstart)
+	(export PREAMBLE="truss  -f -a  -i -l  -u libBICC:: -u!libc  -t !lseek,read,write  -o $TLOG"; mstart)
+
+	vtruss;
+}
+
+mdbx() {
+	set -x;
+	(export PREAMBLE="dbx -F -r"; mstart)
+}
+
+alias mgettarfile=" ls -ld /var/tmp/MGCEAA.tar; cp -p ~/tmp/MGCEAA.tar /var/tmp; ls -ld /var/tmp/MGCEAA.tar";
+
+libBICCvobs="/vobs/mgc3_imp/CRA_SW/CNA_BICC/CAA_BICC/pkgBicc/bin/debug/libBICC.so";
+libBICCtarget="/opt/LMFmgc/libBICC.so";
+
+unalias mputlibBICC; mputlibBICC() {
+	ls -ld $libBICCvobs ~/tmp/libBICC.so;
+	cp -p  $libBICCvobs ~/tmp; 
+	ls -ld $libBICCvobs ~/tmp/libBICC.so;
+}
+
+mgetlibBICC() {
+	ls -ld $libBICCtarget 
+	ls -ld ~/tmp/libBICC.so
+	echo "Saving Old one"
+	save $libBICCtarget
+	echo "Getting"
+	cp -p ~/tmp/libBICC.so  $libBICCtarget 
+	echo "Got it"
+	ls -ld $libBICCtarget 
+	ls -ld ~/tmp/libBICC.so
+}
+
+BICCCOMMON="/vobs/mgc3_imp/CRA_SW/CNA_BICC/CAA_BICC/pkgBicc/src/BICCCommon.cc";
+
+PROJ_PATH="/vobs/mgc3_imp/CRA_SW/CNA_BICC/CAA_BICC/pkgBicc";
+checkallin() {
+	typeset STATE=$(ct ls $PROJ_PATH/src/* $PROJ_PATH/inc/*);
+	typeset CHECKED_OUT=$(print "$STATE" | awk '/CHECKEDOUT/ {print $1}');
+	typeset aStr aFile aRC;
+	for aStr in $CHECKED_OUT; do 
+		aFile=$(print ${aStr%%@@*}); 
+		print "Checking in $aFile";
+		LAST_CHECKIN_FILES="$LAST_CHECKIN_FILES $aFile";
+		if [ "$aFile" != "$BICCCOMMON" ] ; then
+			ct ci -nc $aFile;
+			aRC=$?;
+			if [ "$aRC" != "0" ] ; then
+				print "UnCo  $aFile";
+				ct unco   -keep $aFile;
+			fi;
+		else
+			print "Leaving BICCCommon.cc ALONE......";
+		fi
+	done;
+}
+checkcheckedout() {
+	typeset STATE=$(ct ls $PROJ_PATH/src/* $PROJ_PATH/inc/*);
+	typeset CHECKED_OUT=$(print "$STATE" | awk '/CHECKEDOUT/ {print $1}');
+	print "$CHECKED_OUT";
+}
+
+checkoutagain() {
+	for each in $LAST_CHECKIN_FILES; do
+		if [ "$aFile" != "$BICCCOMMON" ] ; then
+			print "Checking Out $each";
+			ct co -nc $each;
+		else
+			print "Leaving BICCCommon.cc ALONE......";
+		fi
+	done
+}

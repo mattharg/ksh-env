@@ -1,0 +1,122 @@
+# File:          $HOME/.kshrc.architecture
+# Usage:         called by .kshrc FOR ALL ksh's 
+#                (q?) ONLY ONCE
+# Description    The idea is that my environment should run UNCHANGED
+#                from architecture to architecture, EVEN using one $HOME
+#                for many architectures CONCURRENTLY
+# See Also       "configure" $HOME/.kshrc.aliases, .kshrc.fns, ....
+#                scripts/tell.machine.architecture
+# Methods Used   o the PATH env uses $MYBIN to access the right arch binaries
+#                o scripts must be written to : 
+#                  o use ENV VARs config. the use for the arch., eg
+#                    $AWK to awk on some architecture and nawk on others
+#                  o if this can't be done they should case $UNAME 
+#                  o failing this, they should try to detect themselves
+#                
+#                
+#
+
+
+##set -x 
+
+#
+#    M a c h i n e     A r c h i t e c t u r e 
+#
+UNAME=$(uname);   export UNAME
+
+case $UNAME in 
+	SunOS)  
+		pingtest() {
+			ping $* 3;
+		}
+		AWK="nawk";             
+		WHOAMI_BIN="/usr/ucb/whoami";
+		WHOAMI=`$WHOAMI_BIN`;
+		HOSTNAME=`hostname`
+		HOSTNAME="${HOSTNAME%%.*}";   #To take away any .domain part
+		typeset UNAME_R=$(uname -r);
+		typeset -i numdigits=$(print $UNAME_R | wc -c);
+		if [ $numdigits -gt 4 ] ; then
+			UNAME_R=${UNAME_R%%.?};  # Change 5.5.1 to 5.5
+		fi
+		case $UNAME_R in 
+			4.*) # SunOS (NOT Solaris)
+				MYBIN=$HOME/bin.sunos;    
+				;;
+			5.*) # Solaris
+				MYBIN=$HOME/bin.solaris$UNAME_R; 
+				. $HOME/.kshrc.arch.solaris;
+##		alias grep="/usr/xpg4/bin/grep";
+				;;
+			*) print "Unrecognised ver. of Solaris!";
+				;;
+		esac;
+	;; #break;;
+
+	OSF1) 
+##		AWK="gawk";              #gawk is another alternative also at /usr/bin
+		AWK="nawk";             
+		MYBIN=$HOME/bin.osf1;  
+		WHOAMI_BIN=`id -un`; # an alternative
+		WHOAMI_BIN=`whoami`
+		WHOAMI=`$WHOAMI_BIN`;
+		HOSTNAME=`hostname -s`
+	;; #break;;
+
+	hpux) 
+		AWK="nawk";            
+		MYBIN=$HOME/bin.hpux;  
+		WHOAMI_BIN=`id -un`
+		WHOAMI=`$WHOAMI_BIN`;
+		HOSTNAME=`hostname`
+	;; #break;;
+
+	aix|AIX) 
+		pingtest() {
+			ping -c 1 -w 1 $*;
+			return $?
+		}
+		AWK="awk";            
+		MYBIN=$HOME/bin.aix;   
+		WHOAMI_BIN="id -un";
+		WHOAMI=`$WHOAMI_BIN`;
+##		HOSTNAME=`hostname -s`
+		HOSTNAME=`hostname`
+	;; #break;;
+
+
+
+	CYGWIN*)
+		AWK="gawk";
+		MYBIN=$HOME/bin.cygwin;
+		WHOAMI_BIN='id -un';
+		WHOAMI=`id -un`;
+		##    HOSTNAME=`hostname -s`
+		HOSTNAME=`hostname`
+		alias xt="rxvt -fn 10x16 -bg black -fg yellow -e /bin/ksh";
+		alias convconv="cygpath";
+		;; #break;;
+
+	Linux)
+		AWK="gawk";            
+		MYBIN="$HOME/bin.linux";   
+		WHOAMI_BIN="id -un";
+		WHOAMI=`$WHOAMI_BIN`;
+		HOSTNAME=`hostname -s`;
+		PATH="/usr/local/sbin:/usr/sbin:/sbin:/usr/kerberos/sbin:/usr/kerberos/bin:/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:/usr/bin/X11:/usr/X11R6/bin:/root/bin:$PATH";
+		MANPATH="";  # Best to leave empty with linux
+		##    HOSTNAME=`hostname`
+
+		;; #break;;
+
+	*) 
+		#Defaults for an ONKNOWN o/s
+		print "Ummm have come across this unix arch before... "; 
+		AWK="awk";              #how about if nawk then nawk else awk
+		MYBIN=$HOME/bin;
+	;;
+esac;
+export AWK MYBIN WHOAMI_BIN
+
+##AWK="nawk" # hpux
+

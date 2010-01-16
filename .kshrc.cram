@@ -1,0 +1,449 @@
+#            ksh '.' sourced package library
+#RCS_VER     ="$Id: .kshrc.cram,v 1.5 2000/03/27 07:20:38 eeaharg Exp $"
+#File        : $HOME/.kshrc.cram
+#Usage       : '.' $HOME/.kshrc.cram  see also  $HOME/.kshrc
+#Title       : File crammer, secure compressor functions
+#Author      : Matthew S. Hargreaves
+#Usage       : cram {-cram | -decram}  file-list
+#            : cramtree path-spec
+#SEE ALSO    : ~/.scram5.awk
+#Contents    :
+#      o cram_tree      {-cramstatus |-decramstatus | [-cram |-decram] path+}
+#      o cram           {-cram |-decram} file+
+#      o cramit         file+
+#      o decramit       file+
+#      o cram_get_cram             # !INTERACTIVE_FUNCTION to collect $SCRAM
+#      o cram_cat       file+
+#      o cram_vi        file+
+#      o cram_exe       file+
+#      o cram_print     file+
+#      o cram_preserve_files   file+
+#      o
+#      o
+#Description : 
+# Ideas      : o Hamper cracking, using cram guess | grep begin
+#                by taking the begin and end lines outta the compress
+#                or by replacing with pack.....
+#      done    o have flag available to FORCE EITHER CRAM or DECRAM
+#                to enable FULLY opening or FULLY closing a subtree
+#              o This should also work under MSDOS using mks systems 
+#                utils (filename problems), or VMS...
+#              o Perhaps use something other than compress so that 
+#                we can PIPE things
+#              o Put more checks in so that if BOTH x and x.czesc exists
+#                we don't destroy one  - like sccs.vi
+#              o Why not make the whole thing perl.....
+#
+#Requirements:
+#              must have write access to the parent directory
+#              must have read access  to the file
+#  Assumes a full UNIX implementation including
+#  ----------------------------------
+#   cpio        easy way to retain date and time info
+#   compress    to compress things early
+#   uuencode    to make the thing ASCII for scrambling
+#   awk         to (de) scramble it
+#   uudecode    to return to binary
+#   ksh         the shell, could also write the whole thing in perl.....
+
+CRAM_RELEASE="1.00"
+# $Id: .kshrc.cram,v 1.5 2000/03/27 07:20:38 eeaharg Exp $
+# %W%       %G%
+#History     : 1.00 msh 
+#              
+
+#
+# NB: This '.'-sourced library of functions uses the ksh alias below in a
+#     simillar manner to a cpp (#define) macro. 
+#     It checks the '$RT' return code of the most recent command and 
+#     returns from the calling fn() if non-zero.
+let RT="0"; unalias cram_check_RT;  alias -x cram_check_RT=' 
+	if [ "$RT" -ne 0 ] ; then
+		print "cram: $0: Returned $RT: $RT_MSSG"; return $RT
+	fi
+ ';
+
+# D A M B !  For some reason this alias (above) isn't working.....
+# I'll try to define a fn instead.....
+#
+unalias cram_check_RT; cram_check_RT() {
+	if [ "$RT" -ne 0 ] ; then
+		print "cram: $0: Returned $RT: $RT_MSSG"; return $RT
+	fi
+}
+
+
+
+CRAM_TRACE='set -x';  # Use to trace all cram fns
+CRAM_TRACE='';
+#              
+# T H E   A l g o r i t h m     i n     a w k
+#
+AWK=${AWK:-nawk};
+
+CRAM_GET_KEY_AWK='
+BEGIN {
+	SRC="\tab87SklmwxyzA Bnop{}[IJghijOPQRdef9T!@#$qrst0KLMNcuvCDEFGH%^&*()_+=-654UV/321]:;|WXYZ.,<>?~"
+
+
+	#SRC must be different from that of scram5.awk.......
+	SRCSIZE=length(SRC)
+	KEY=""
+	LEN=20
+	LEN=60
+	BASE=1001
+	SHIFT=678
+	MODE=3678913
+}
+# The input is expected to be a single line with one word
+	{
+		PW=$1
+		PWSIZE=length(PW)
+		SALT=index(SRC, substr(PW, PWSIZE,    1)) + \
+				 index(SRC, substr(PW, PWSIZE -1, 1))
+		srn=SALT
+##		print SRCSIZE, PW, PWSIZE, SALT
+		for (i==1; i<LEN; i++) {
+			pwpart=index(SRC, substr(PW, 1+(i % PWSIZE), 1))
+			srn=((srn + BASE) * SHIFT + pwpart) % MODE
+			posn=1 + (srn % SRCSIZE)
+##			KEY=KEY posn " "
+			KEY=KEY substr(SRC, posn, 1)
+		}
+	}
+END {
+	printf "%s\n", KEY
+}'
+
+# F u n c t i o n s 
+####################
+
+cramit() { #set -x;     ## cram a single file fred -> fred.czesc4
+$CRAM_TRACE
+# Don't forget ERROR Handling....
+	typeset file="$1"                # q/ any flags?
+
+	typeset FILEPATH=${file%/*};      # My `dirname`  THESE should be global fns.
+	if [ "$FILEPATH" = "$file" ] ; then
+		FILEPATH="$PWD"
+	fi
+
+	typeset BASEFILENAME=${file#${FILEPATH}/}   # My `basename`
+##	print "cram $file, path $FILEPATH, name $BASEFILENAME"
+
+	typeset OLDDIR="$PWD"; 
+	cd $FILEPATH;           RT=$?;RT_MSSG="0. failed to cd $PWD/$BASEFILENAME"; cram_check_RT
+	file=$BASEFILENAME;
+	typeset Z="$file.czesc1";
+	typeset E="$file.czesc2";
+	typeset S="$file.czesc3";
+	typeset C="$file.czesc4";
+
+	print "  cram  $BASEFILENAME";
+	print $file | cpio -ocm >$file.cpio;   RT=$?;RT_MSSG="1. failed to cpio"; cram_check_RT
+	compress              -f $file.cpio;   RT=$?;RT_MSSG="2. failed to compr  $PWD/$BASEFILENAME"; cram_check_RT
+	mv                   $file.cpio.Z $Z;  RT=$?;RT_MSSG="3. failed to mv  $PWD/$BASEFILENAME"; cram_check_RT
+	uuencode $Z $Z > $E;                   RT=$?;RT_MSSG="4. failed to uuenc  $PWD/$BASEFILENAME"; cram_check_RT
+	rm -f $Z;                              RT=$?;RT_MSSG="5. failed to rm  $PWD/$BASEFILENAME"; cram_check_RT
+	$AWK -f $HOME/.scram5.awk $E > $S;     RT=$?;RT_MSSG="6. failed to scram  $PWD/$BASEFILENAME"; cram_check_RT
+	rm -f $E;                              RT=$?;RT_MSSG="7. failed to rm  $PWD/$BASEFILENAME"; cram_check_RT
+	compress -f $S;                        RT=$?;RT_MSSG="8. failed to compr  $PWD/$BASEFILENAME"; cram_check_RT
+	mv $S.Z $C;                            RT=$?;RT_MSSG="9. failed to mv  $PWD/$BASEFILENAME"; cram_check_RT
+
+	rm -f $file;                           RT=$?;RT_MSSG="10 failed to rm  orig. $PWD/$BASEFILENAME"; cram_check_RT
+	cd $OLDDIR
+}
+
+decramit() {    # set -x; ## decram a single file fred.czesc4 -> fred
+$CRAM_TRACE
+	typeset file="$1"
+
+	FILEPATH=${file%/*}
+	if [ "$FILEPATH" = "$file" ] ; then
+		FILEPATH="$PWD"
+	fi
+	BASEFILENAME=${file#${FILEPATH}/};
+
+##	print "cram $file, path $FILEPATH, name $BASEFILENAME"
+
+##	RT="$?";   RT=$?;RT_MSSG="..."
+	typeset OLDDIR="$PWD"; 
+	cd $FILEPATH;                         RT=$?;RT_MSSG="0. CANT cd "; cram_check_RT
+	file="$BASEFILENAME";
+
+	typeset CRAMEXTN="${file##*czesc}";
+	typeset EXTN=".czesc${CRAMEXTN}";
+	typeset BASE="${file%%${EXTN}}";
+
+	typeset Z="$BASE.czesc1";
+	typeset E="$BASE.czesc2";
+	typeset S="$BASE.czesc3";
+	typeset C="$BASE.czesc4";
+
+##	print file:$file, EXTN:$CRAMEXTN, BASE:$BASE
+	print "DEcram  $BASE"
+	cp $file $S.Z;                        RT=$?;RT_MSSG="1. failed to cp  $PWD/$BASEFILENAME"; cram_check_RT
+	uncompress $S.Z;                      RT=$?;RT_MSSG="2. failed to uncompr  $PWD/$BASEFILENAME"; cram_check_RT
+	$AWK -f $HOME/.scram5.awk $S   > $E;  RT=$?;RT_MSSG="3. failed to scram  $PWD/$BASEFILENAME"; cram_check_RT
+	rm $S;                                RT=$?;RT_MSSG="4. failed to rm  $PWD/$BASEFILENAME"; cram_check_RT
+	uudecode $E  >/dev/null 2>&1         
+	if [ "$RT" -ne 0 ]
+	then
+		print "$ME:  $BASE: DEcramming FAILED, perhaps because of WRONG KEY"
+		print "$ME:  $BASE: Try again with a different KEY"
+		rm $E
+	fi
+																								 RT=$?;RT_MSSG="5. failed to uudecode  $PWD/$BASEFILENAME"; cram_check_RT
+	rm $E;                                RT=$?;RT_MSSG="6. failed to rm   $PWD/$BASEFILENAME"; cram_check_RT
+	mv $Z $BASE.Z;                        RT=$?;RT_MSSG="7. failed to mv   $PWD/$BASEFILENAME"; cram_check_RT
+	uncompress $BASE.Z;                   RT=$?;RT_MSSG="8. failed to uncompr  $PWD/$BASEFILENAME"; cram_check_RT
+	mv $BASE $BASE.cpio;                  RT=$?;RT_MSSG="9. failed to mv  $PWD/$BASEFILENAME"; cram_check_RT
+	cpio -icm $BASE <$BASE.cpio;          RT=$?;RT_MSSG="10 failed to cpio  $PWD/$BASEFILENAME"; cram_check_RT
+	rm $BASE.cpio;                        RT=$?;RT_MSSG="11 failed to rm  $PWD/$BASEFILENAME"; cram_check_RT
+	rm $file;                             RT=$?;RT_MSSG="12 failed to rm  orig $PWD/$BASEFILENAME"; cram_check_RT
+	cd $OLDDIR
+}
+
+cram() {   #set -x; # Front-end to cramit and decramit, TOGGLING by default
+$CRAM_TRACE
+  typeset   CRAMONLY="";
+	typeset DECRAMONLY="";
+
+	case "$1" in
+			-cram)     CRAMONLY="TRUE"; shift ;;
+		-decram)   DECRAMONLY="TRUE"; shift ;;
+	esac;
+
+	typeset FILELIST="$*";
+	typeset UMASK=$(umask);  umask 177;
+
+	if [ -z "$SCRAM" ] ; then
+		cram_get_cram
+	fi 
+
+	for file in $FILELIST; do	
+		NOTFOUND="";
+		if [ ! -f $file ] ; then
+			orig="$file";
+			file="$orig.czesc4";
+			if [ ! -f $file ] ; then
+				NOTFOUND="TRUE"
+			fi
+		fi
+
+		CRAMEXTN=${file##*czesc};
+
+		if [ "$NOTFOUND" ] ; then
+			print "cram: file not found, $orig"
+		else
+			# Must have a way to ensure we do NOT cram 
+			# .scram.vi   .scram5.awk   .cram   .cramtree   ie. *cram* 
+			# no point in scrambling the *.scram files
+			ISCRAMSYSTEM=${file##*cram}
+	##		print file is $file ISC is $ISCRAMSYSTEM
+			if [ "$ISCRAMSYSTEM" != "$file" ] ; then
+				print "cram: IGNORING CRAM system file, $file"
+			else
+				if [ "$CRAMEXTN" != "$file" ] ; then
+					if [ ! "$CRAMONLY" ]  ; then
+						decramit $file
+					else
+						print "cram:NOT decraming $file: Already CRAMd"
+					fi
+				else
+					if [ ! "$DECRAMONLY" ] ; then
+						cramit $file
+					else
+						print "cram: NOT craming $file: Already DECRAMd"
+					fi
+				fi
+			fi
+		fi
+	done
+	umask $UMASK;
+}
+
+cram_cat() { 
+$CRAM_TRACE
+	for cfile ; do
+		(
+		cram -decram $cfile 1>&2  #>/dev/null 2>&1; 
+		cat             $cfile;
+		cram -cram   $cfile 1>&2  #>/dev/null 2>&1;
+		) 
+	done
+}
+
+
+#The idea of this is to provide a means to execute a cram'd
+#file.  EG. have the files stored on the disk in cram'd format
+#but have this program, decram them, execute them and decram again
+# afterwards in the background
+# IDEA: have a .logout program do a cramtree -cram ~
+# and a .login to do a  .cramtree -decram <SPECIFIC FILES>
+# perhaps the login part could occur straight after the .logout
+# so that its quick when one next logs in.
+# prehaps the names .cram.hello   .cram.goodbye
+cram_exe() {
+$CRAM_TRACE
+	cram_get_cram
+
+	typeset EXE="$1"; shift; 
+	typeset PARAMS="$*";
+	typeset file=$EXE;
+	typeset FILEPATH=${file%/*};
+
+	if [ "$FILEPATH" = "$file" ] ; then
+		FILEPATH="$PWD"
+	fi
+	typeset BASEFILENAME=${file#${FILEPATH}/};
+	##      print "cram $file, path $FILEPATH, name $BASEFILENAME"
+##	stem=$BASEFILENAME
+
+	typeset CRAMEXTN=${file##*czesc}
+	typeset EXTN=".czesc${CRAMEXTN}"
+	typeset BASE=${file%%${EXTN}}
+	
+#DO IT
+	cram -decram $file
+	$BASE    $PARAMS  # q. eval ? ..
+	cram   -cram $BASE
+}
+
+cram_print() { set -x; # Assumes all the files presented have the same scrambling key.
+$CRAM_TRACE
+	cram_get_cram
+	for file ; do
+		FILEPATH=${file%/*};
+		if [ "$FILEPATH" = "$file" ] ; then
+			FILEPATH="$PWD"
+		fi
+		BASEFILENAME=${file#${FILEPATH}/};
+		##      print "cram $file, path $FILEPATH, name $BASEFILENAME"
+	##	stem=$BASEFILENAME
+
+		CRAMEXTN=${file##*czesc}
+		EXTN=".czesc${CRAMEXTN}"
+		BASE=${file%%${EXTN}}
+		
+		cram -decram $file
+		P            $BASE # 'P' is my std printing fn....
+		cram   -cram $BASE
+	done
+}
+
+cram_vi() {
+$CRAM_TRACE
+
+##trap return CLEANUP....
+
+	cram_get_cram  # Get the CRAM values if not already there.
+
+	for cfile ; do
+		if [ -f $cfile ] ; then
+			print "cram_vi:File already in use - uncram'd; skipping";
+			next;
+		fi
+		if [ ! -f $cfile.czesc4 ] ; then
+			print "cram_vi:FILE NOT FOUND $cfile. Create? (Y/N):\c"; read REP;
+			case $REP in
+				y|Y|yes|YES) : ;;
+				*)           next;;
+			esac;
+		fi
+		if [ -f $cfile.~.czesc4 && ! -z $cfile.~.czesc4 ] ; then
+			cp -p         $cfile.~.czesc4   $cfile.~~.czesc4 2>/dev/null;
+		fi
+		if [ -f $cfile.czesc4   && ! -z $cfile.czesc4 ] ; then
+			cp -p         $cfile.czesc4     $cfile.~.czesc4  2>/dev/null;
+		fi
+		cram -decram    $cfile; 
+		chmod go-rwx    $cfile; 
+		/bin/vi         $cfile;  # Gotta stop that /var/tmp files from being exposed...
+		cram -cram      $cfile;
+		chmod go-rwx    ${cfile}*;
+	done
+}
+
+cram_tree() {
+$CRAM_TRACE
+	case "$1" in 
+		-cramstatus)
+			print "cram_tree:NOT cram'd"; shift
+			find $* -type f ! -name '*czesc*' -print | grep -v cram;
+			return $?;; 
+
+	  -decramstatus)
+			print "cram_tree:cram'd"; shift
+			find $* -type f -name '*czesc*' -print; 
+			return $?;;
+
+	  -cram|-decram)
+			CRAM_OPTS="$1"; shift;
+			cram_get_cram;
+			typeset SHORT_DATE=$(date '+%a%d%b.%H.%M.%S'); 
+			typeset DATE="$SHORT_DATE"
+			LOG=$HOME/.cramtree.log;
+			for ROOT in $*; do
+				print "  "                                                       >> $LOG
+				print "$DATE tree $ROOT"                                         >> $LOG
+				print "--------------------------------------------------------" >> $LOG
+				nice $NICEPARAMS  find $* -type f -exec cram $CRAM_OPTS  {} \; | tee -a $LOG
+			done
+			;;
+	esac;
+}
+
+
+# function:         cram_get_cram
+# Usage:            Get's the 'cram' keys into env.var's
+#                   o These are in $SCRAM and $SCRAMFILE
+#                   o .cram uses these env.var's are calls this file is needed.
+#                   o If the file is sh sourced, eg. '.', then they persist for
+#                     the lifetime fo the shell, useful for interactive shells
+#                     shell's as well
+#                   o
+# Notes:            o 
+#                   o
+#
+
+cram_get_cram() {  #set -x; # INTERACTIVE fn to get the SCRAM key...
+$CRAM_TRACE
+	if [ ! -z "$SCRAM" -a "$1" != "-f" ] ; then 
+		: #Do nothing if its already set UNLESS we get passwd a '-f' (forace)
+		return
+	else
+		print "Cram:"; stty -echo; read spw; stty echo
+		export SCRAM=`print $spw| ${AWK:-nawk} "$CRAM_GET_KEY_AWK"`;
+##		print "cram:Key is $SCRAM";
+		spw=""; unset spw;
+
+		print "Scramble file:"; stty -echo; read sfile;	stty echo; 
+		export SCRAMFILE="$sfile";
+	fi
+}
+
+cram_preserve_files() {
+$CRAM_TRACE
+typeset HOME_DOTS=".ALLHOSTS.ALL .LL .PATH .allhosts.all .crontab .exrc .forward .kshrc .login .needed.manuals .ph .profile .rhosts .signature .xerrors .xinitrc"
+
+typeset SCRIPT_FILES=" P PERSISTS PRINT.DEST.TEST allhosts allhostsbarme allhostsbarme.distrib allhostsbarme.do.script awk.template ksh.template ph ph.pl ph.pl.2 ph.sh repeat sed.template win.yellow"
+
+typeset ETC_FILES="ALLHOSTS.DEFN.czesc4"
+
+cram_get_cram;
+cd $HOME;            $HOME/.cram -decram $HOME_DOTS 
+cd $HOME/scripts;    $HOME/.cram -decram $SCRIPT_FILES
+cd $HOME/etc;        $HOME/.cram -decram $ETC_FILES
+
+	cram_create_links() {
+		cd  $HOME; for file in $HOME_DOTS; do	
+			ln $file $file.cram.keep 2>/dev/null
+		done
+
+		cd  $HOME/scripts; for file in $SCRIPT_FILES; do	
+			ln $file $file.cram.keep 2>/dev/null
+		done
+	}
+}
+

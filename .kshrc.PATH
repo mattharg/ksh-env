@@ -1,0 +1,142 @@
+#File              : $HOME/.kshrc.PATH
+#Description       : set's the PATH env var
+#NOTES             : when it gets TOO LARGE, it causes the shell to crash.
+#                    and sometimes progs (/shells) that are called from it.
+#
+#Techniques        : o Remove Duplicates from the list of paths
+#                    o Better Decision on ordering
+#                    o Check for existence of paths, and only include if -x
+#                      AND if not already part of $PATH
+#                    o DO checks for the length of $PATH, and REPORT and abort if too LONG
+# 
+#                    o DONT pollute the namespace with unncessary env-vars.
+#                      = unset the names at the end.....
+#                    o Use the add_path() from .kshrc.fns.paths
+#
+#
+#
+
+#  STD PATH DEFINITIONS
+#######################
+
+if [ -z "$KSHRC_PATH_COLLECTED" ] ; then
+export KSHRC_PATH_COLLECTED="true";
+
+path() {  # Use this to repeatedly regain the PS1 
+	export KSHRC_PATH_COLLECTED="";
+	'.' ~/.kshrc.PATH;
+}
+
+#################################
+#         P A T H    D e f n  ###
+#################################
+
+# EPA - Sunos   Platforms -  /usr/local/bin,sbin      Solaris  <5
+#       Solaris Platforms - /apps/local/bin,sbin      Solaris >=5
+#       Not-NFS           -  /opt/local/bin,sbin
+
+# NB:!! /opt/sfw/bin  may be better than /opt/SUNWspro/bin on sip1  !!
+PATH="\
+/loca/bin:\
+$MYBIN:\
+/apps/apssystem_4.1/bin:\
+/usr/dt/bin:\
+/bin:\
+/usr/bin:\
+/usr/sbin:\
+/opt/sfw/bin:\
+/opt/SUNWspro/bin:\
+/usr/ucb:\
+/usr/ccs/bin:\
+/usr/openwin/bin:\
+$HOME/spare/local/bin:\
+/opt/local/bin:\
+/opt/local/sbin:\
+/apps/bin:\
+/apps/local/bin:\
+/apps/scripts/bin:\
+/apps/local/sbin:\
+/usr/local/bin:\
+/usr/local/sbin:\
+/usr/local/sbin:\
+/usr/sbin:\
+/sbin:\
+/usr/kerberos/sbin:\
+/usr/kerberos/bin:\
+/usr/atria/bin:\
+/bin:\
+/usr/bin:\
+/usr/local/bin:\
+/usr/bin/X11:\
+/usr/X11R6/bin:\
+$HOME/scripts:\
+$HOME/$SITE/scripts:\
+$PATH\
+";
+
+# To ensure we have a valid path
+
+ed_path   -non-interactive   2>/dev/null # BTW, This is REALLY REALLY slow....
+##ed_path   
+
+MANPATH="\
+/opt/SUNWspro/man:\
+/usr/share/man:\
+/opt/sfw/man:\
+/usr/atria/doc/man:\
+/apps/local/man:\
+/opt/local/man:\
+$HOME/spare/local/man:\
+$MANPATH\
+";
+
+ed_path -non-interactive MANPATH   2>/dev/null  # BTW, This is REALLY REALLY slow....
+
+
+# Probably best (quicker) to take the locally mounted libs before NFS ones.
+LD_LIBRARY_PATH="\
+/usr/lib:\
+/opt/sfw/lib:\
+/usr/share/lib:\
+/usr/openwin/lib:\
+/usr/ccs/lib:\
+/usr/xpg4/lib:\
+/usr/java1.2/lib:\
+$HOME/spare/local/lib:\
+$HOME/spare/local/X11/lib:\
+$HOME/lib.solaris:\
+$LD_LIBRARY_PATH\
+";
+
+ed_path -non-interactive LD_LIBRARY_PATH   2>/dev/null  # BTW, This is REALLY REALLY slow....
+
+CLASSPATH="\
+$HOME/spare/communicator/java/classes:\
+$HOME/.netscape/plugins:\
+$HOME/spare/Solaris_JDK_1.2.1_03a/jre/lib/ext:\
+$HOME/spare/Solaris_JDK_1.2.1_03a/jre/lib/:\
+$HOME/spare/Solaris_JDK_1.2.1_03a/lib/:\
+";
+
+ed_path -non-interactive CLASSPATH         2>/dev/null  # BTW, This is REALLY REALLY slow....
+
+
+export MATTS_PATH=$PATH;
+export MATTS_MANPATH=$MANPATH;
+export MATTS_LD_LIBRARY_PATH=$LD_LIBRARY_PATH;
+print "  Done"; 
+else 
+	if [ "$PATH" = "$MATTS_PATH" ] ;then
+		print "  Done already"; 
+	else
+		export FORIEGN_PATH=$PATH;                       
+		export FORIEGN_MANPATH=$MANPATH;                 
+		export FORIEGN_LD_LIBRARY_PATH=$LD_LIBRARY_PATH; 
+		PATH=$MATTS_PATH;
+		MANPATH=$MATTS_MANPATH;
+		LD_LIBRARY_PATH=$MATTS_LD_LIBRARY_PATH;
+		print "  Done already and re-captured"; 
+	fi
+fi;
+
+

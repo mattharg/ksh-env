@@ -1,0 +1,198 @@
+##set -x;
+# File:          $HOME/.kshrc.fns.ps
+# Usage:         called by .kshrc ONLY FOR INTERACTIVE ksh's 
+# Description:   provides some useful utils for dealing with ps
+# See Also       x $HOME/.kshrc.fns   
+#                x $HOME/scripts/pstree - my lovely perl script to ps a pstree
+#                  This is my perl script that prints all the procs 
+#                  for a subtree.  It's FAST.
+# To Do:         
+#                
+#                o 
+#                o 
+ 
+###################################################
+#       T A B L E     O F      F U N C T I O N S 
+###################################################
+#
+# pstty()          tty/n          show the procs connected to a tty
+# psme()           username       show the procs connected to a username
+# psanc()          pid            show the procs that are ancestors of pid
+# psgrep()         name           show the procs that match name 
+# pscomm()         name           show the procs that comm equal name 
+# killpid()        pid+           kill all the pid+ KINDLY if poss....
+# killname()       name           kill all the pids that match name
+# killuser()       username       kill all the pids for the username
+
+# psbig()          pidlist        give HEAPs of ps info        for pidlist
+# psargs()         pidlist        gives the command arguments  for pidlist
+# pswho()          pidlist        gives the user details       for pidlist
+# psperf()         pidlist        gives the performance info   for pidlist   
+
+pstty() { #set -x;  # ps for a tty
+	typeset PSTTY="${*:-`tty`}";  PSTTY=${PSTTY##/dev/};
+	pstty=$(ps -t "$PSTTY" -o "pid=");
+	ps -f -p "$pstty";
+ 	print "\$pstty is \c"; print $pstty; 
+	print "Can Use\n\t psperf | xgp \$pstty  ";
+}
+
+psme() { #set -x;  # ps for a user alla ps -fu
+	typeset PSME_USER="${*:-$LOGNAME}";
+	psme=$(ps -u "$PSME_USER" -o "pid=");
+	ps -f -p "$psme";
+ 	print "\$psme is \c"; print $psme; print "Can Use\n\t psperf | xgp \$psme  ";
+}
+
+psanc() { #set -x;  # ps for all MY ancestors....
+	typeset pid="${1:-$$}";
+	typeset psanc="";
+	while [ ! -z "$pid" -a $pid -ne 1 ] ; do
+		psanc="$psanc $pid";
+##		/bin/ps -o"ppid" -p $pid | while read line; do pid="$line"; done
+		pid=$(/bin/ps -o"ppid=" -p $pid);
+	done
+	ps -f -p "$psanc";
+ 	print "\$psanc is \c"; print $psanc; print "Can Use\n\t psperf | xgp \$psanc  ";
+}
+
+psgrep() { #set -x; 
+	for name; do
+		psgrep=$(ps -eo pid,comm  | awk "/$name/ {print "'$1}');
+		ps -f -p "$psgrep";
+		print "\$psgrep is \c"; print $psgrep; 
+##		print "Can Use\n\t psperf | xgp \$psgrep  ";
+	done
+}
+
+pscomm() { #set -x; 
+	for comm; do
+		pscomm=$(ps -eo pid,comm | awk  '{ if ($2 =="'"$comm"'") print $1 }'  );
+		if [ ! -z "$pscomm" ] ; then
+			ps -f -p "$pscomm";
+			print "\$pscomm is \c"; print $pscomm; 
+		fi
+		#print "Can Use\n\t psperf | xgp \$pscomm  ";  # should use a '-p ..'
+	done
+}
+
+fusertree() {
+	typeset fusertreeroot fusertreefiles;
+
+	for fusertreeroot; do
+		print "Searching $fusertreeroot \c";
+		fusertreefiles=$(find $fusertreeroot -print); print ": \c";
+		fusertree=$(fuser $fusertreefiles 2>/dev/null);
+		if [ ! -z "$fusertree" ] ; then
+			print "found pids $fusertree";
+			ps -fp "$fusertree";
+			lsof -p $fusertreefiles;
+		else
+			print "non found";
+		fi
+	done
+}
+
+#    #
+#   #       #    #       #          #    #    #   ####
+#  #        #    #       #          #    ##   #  #    #
+###         #    #       #          #    # #  #  #
+#  #        #    #       #          #    #  # #  #  ###
+#   #       #    #       #          #    #   ##  #    #
+#    #      #    ######  ######     #    #    #   ####
+
+killpid() { #set -x;  # kills the pid in an increasingly severe manner
+	#                 HUP INT EXIT ALRM KILL
+	typeset KILLSIGS="2   3   1    15   9" 
+	for PID; do
+		for SIG in $KILLSIGS; do
+			 PIDNAME=`ps -p $PID | awk "/$PID/"'{print $4}'`;
+			 print "\npid $PID ($PIDNAME) signalled -$SIG \c";
+			 kill -$SIG $PID; sleep 2
+			 PIDCHK=`ps -p $PID | grep $PID` # used to see if pid still exists
+			 if [ -z "$PIDCHK" ]; then
+					print "...killed"; break 1
+			 fi
+		done
+	done
+}
+
+killname() {     #set -x; #Kill's all ps which fully match the 'name' supplied
+	typeset pid=$(ps -e | awk '$4 = "'"$name"'"  {print $1}');
+	[ "$pid" != "" ] && killpid $pid;
+}
+
+
+killuser() { #set -x;  # Kills all ps for a user KINDLY....
+  # NB scope of these two vars is visible throughout the fn killuser, 
+	#    ie. Also within the 2 x local fns, that make user of them....
+	typeset  PIDLIST;   # List of PIDs  for this user 
+	typeset PPIDLIST;   # List of PPIDs for this user
+
+	killuser_cleanup() { #set -x;  # remove any tempory files of the fn
+		rm /tmp/killuser.$$.*;
+	}
+	trap killuser_cleanup EXIT;
+
+	kill_getdata() { #set -x # gets user process list into PIDLIST and PPIDLIST
+		for user; do
+			typeset tmpfile="/tmp/killuser.$$.$user";
+			#Do I need a tmp file, getter removal of exiting and defunct and PPID....
+			#Do I need the -f to ps, how about using -o....
+			ps -fu $user | grep -v "<exiting>" | grep -v "<defunct>" | grep -v "PPID " > $tmpfile;
+			 PIDLIST=`awk '{print $2}' $tmpfile`;
+			PPIDLIST=`awk '{print $3}' $tmpfile`;
+		done
+	}
+
+	kill_examiner() { #set -x  # decides whether a user's process should be killed
+		for PID in $PIDLIST; do
+			# This is how it works::
+			# goes through all the PIDLIST and looks for a PID that 
+			# *ISNOT* in PPIDLIST, ie. it isn't a parent itself..., and then kills it.
+
+			# !! This algorithm should use ksh sets  ~/.kshrc.sets   !!!!
+
+			 for PPID in $PPIDLIST; do
+				 if [ "$PID" = "$PPID" ]; then
+					 KILLIT="n"; break 1
+				 fi
+			 done
+			 if [ "$KILLIT" = "y" ]; then
+			   killpid $PID; 
+			 else
+				 KILLIT="y"; 
+			 fi
+		done
+	}
+
+	if [ -z "$1" ]; then
+		print 'usage: killuser {userid}+'; return 1;
+	fi
+
+	for user; do
+		if [ "$user" = "root" -o "$user" = "0" ]; then
+			 print "killuser:You cannot kill the root user - use init for that"
+		else
+			kill_getdata $user; 
+			while [ ! -z "$PIDLIST" ]; do
+				kill_examiner $user
+				kill_getdata  $user
+			done
+		fi
+	done
+}
+
+# How To Use these: Do a psname, say, then, psperf -p "$psname"
+
+alias  psTEST=" ps -o  'class,uid,ruser' "; 
+alias  psbig=" ps -o 'class,ruser,uid,pid,pri,nice,wchan,stime,etime,time,pcpu,vsz,comm' "; 
+alias psargs=" ps -o 'pid,ppid,user,args' ";
+alias  pswho=" ps -o 'pid,ppid,user,uid,ruid,tty,class,args' ";
+alias psperf=" ps -o 'pid,class,pri,nice,wchan,stime,etime,time,pcpu,vsz,comm' ";
+
+alias  psbig_sol=" ps -o 's,class,ruser,uid,pid,pri,nice,wchan,stime,etime,time,pcpu,osz,vsz,rss,comm' "; 
+alias psargs_sol=" ps -o 'pid,ppid,user,args' ";
+alias  pswho_sol=" ps -o 'pid,ppid,user,uid,ruid,tty,s,c,class,args' ";
+alias psperf_sol=" ps -o 'pid,s,class,pri,nice,wchan,stime,etime,time,pcpu,osz,vsz,rss,comm' ";
+

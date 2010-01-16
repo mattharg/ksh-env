@@ -1,0 +1,18 @@
+check_objs() {
+	typeset bn c j;
+	for c in *.class; do 
+		bn=${c%%.class};
+		j=$bn.java;
+		ls -ld  $j>/dev/null; 
+	done
+  print "\n\n";
+	typeset bn c j;
+	for j in *.java; do 
+		bn=${j%%.java};
+		c=$bn.class;
+		ls -ld  $c>/dev/null; 
+	done
+
+}
+
+

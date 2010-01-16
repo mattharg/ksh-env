@@ -1,0 +1,1786 @@
+##set -x; 
+# File:         $HOME/.kshrc.fns
+# Description:  called by .kshrc ONLY FOR INTERACTIVE ksh's 
+#               (q?) ONLY ONCE
+# See Also      $HOME/.kshrc.aliases    
+# TODO          split this up into seperate files grouped on type
+#                o paths  o env  o searching  
+#                o version cntrol (rcs, save, symlinks)
+#                o shell interaction (all, manprint, ps*, mshexit, ktrace, errtree)
+#
+#
+# FUNCTIONS
+#        COMMAND-LINE HELPERS
+#               myxargs()  Like the gnu xargs command,            cmmd | xargs cmmd
+#               all()      Simillar idea to xargs                 all cmmd file files files files
+#        ENVIRONMENT HELPERS
+#               show()     Display ONE PER LINE                   show $HEAPS_OF_LINES
+#               show_env() Display the chosen envvars,            ?? show_env PATH MANPATH PWD HOSTNAME
+#               save()     Use if not using rcs etc.              save myfile
+#               mshexit()  get aliases to exit....
+#               errtee()   swap out and err | tee | and swap back errtee mycommand
+#        TOOLS
+#               sp()       show path                              sp $PATH; sp $LD_LIBRARY_PATH
+#               lstoday()  list todays files only....
+#               ktrace()   trace a ksh shell invocation           ktrace myprog.ksh
+#               findmanpage find that manpage                     findmanpage freddys_fn
+#               manprint() print the manpage
+#               podprint() print the pod page
+#               books()    Interface to ALL the 'book' progs
+#
+#        PATHS
+#               These are in the file $ME.paths
+#
+#
+##set -x 
+
+##if [ -z "$KSHRC_FNS_COLLECTED" ] ; then
+export KSHRC_FNS_COLLECTED="yes";
+
+'.'  ~/.kshrc.sets       # Pull in the set  related functions
+'.'  ~/.kshrc.fns.paths  # Pull in the path related functions
+'.'  ~/.kshrc.fns.ps     # Pull in the proc related functions
+##############################
+#       F U N C T I O N S 
+##############################
+
+kshrc_maketags() {
+typeset MAIN_KSH_FILES=".kshrc .kshrc.fns .kshrc.fns.paths .kshrc.fns.fnprog .kshrc.fns.ps \
+.kshrc.PATH .kshrc.aliases .kshrc.PS1 .kshrc.PATH .kshrc.architecture .kshrc.arch.solaris \
+.kshrc.c_dev .kshrc.cc .kshrc.cram .kshrc.dev .kshrc.ds .kshrc.networking .kshrc.perl.if .kshrc.sets \
+.kshrc.site.None .kshrc.site.rbau";
+typeset CTAGS="ctags";
+typeset CTAGS="$HOME/dev/ctags554/ctags.exe";
+	(cd; $CTAGS --language-force=sh --sh-kinds=+f   $MAIN_KSH_FILES);
+}
+
+kshrc_fns() {
+	typeset NAWK_SCRIPT=$(<<EOS
+/^[A-z0-9]*\(\)/ { printf "%20s -- %s\\n", ENVIRON["kfile"], \$0; }
+EOS);
+
+##	print NAWK_SCRIPT is "$NAWK_SCRIPT";
+	(cd; typeset -x kfile;
+	for kfile in .kshrc*; do 
+  		nawk "$NAWK_SCRIPT" $kfile | grep ${1:-.};
+	done);
+}
+
+ng=$(nawk '/^[A-z]* / {print $1}' $HOME/.netgroup) # .epa.all, .dns.nis
+
+allhosts() { ##set -x;
+typeset singlequote="'";
+typeset USAGE='
+NAME
+  allhosts - Create a list of hosts using differing methods, and optionally,
+             use each in list to:
+    o Verify Name Resolution  using DNS
+    o Verify visibility       using ping
+    o Verify remote access    using rsh
+    o Execute commands on the remote host using remote()
+      The list of hosts generated is returned in envvar $ALLHOSTS.
+			This list is reduced to those that are successfull,
+      and the env.var can be editted using -group without further params.
+SYNOPSIS
+  allhosts [ hostlist ] [ flags ] [ commands ], where 
+    [ hostlist ] can be defined using any of 
+      -group                  # Creates interactive edit to assign to the group
+      -group     "host1 host2 host3"
+      -groupfile  afile       # If simple filename, $HOME/.group. is prepended.
+      -netgroup   ngA
+      -dnsmatch   regexp      #Eg. ^..sp
+      -ypmap      mapname     #Eg. ypservers (ie. does a ypcat -k ypservers)
+    [ flags ] are any of 
+      -resolve                # resove the names
+      -ping                   # ping the host
+      -access                 # Test access by doing a rsh
+      -barme                  # Dont include this host in the list
+      -concurrently           # Dont do hosts consecutively; fork like mad
+    [ remote() options ] as part of command are
+      "-script ascriptfile"   # Run that script on all hosts
+      "-distrib apath"        # Copy that file to all hosts
+DESCRIPTION
+  The command, if supplied, is executed on the list of hosts given in the
+  env.var. $ALLHOSTS, using remote().
+  $ALLHOSTS can be assigned to using any of 
+    -group, -groupfile, -netgroup, -dnsmatch.   
+  The flag -group with no params, assigns to this env.var.  with an interactive
+  edit.
+  If multiple commands are given using,   allhosts comm1 comm2 comm3,
+  subsequent commands do NOT execute when one returns non-zero status.
+  Since remote() is used the remote() special commands can be used, eg. 
+  "-script  scriptfile", and 
+  "-distrib apath"
+LITERAL TRANSLATION
+  Since remote() is used for any remote shells, 
+  The literal "_remote_" will be translated to the hostname of the remote host.
+  The literal "_date_"   will be translated to  a  datatime stamp of the 
+  commencement of the cmmd.
+EXAMPLES
+  allhosts -group "host1 host2" -ping
+  allhosts -group "host1 host2" -access
+  allhosts -group hostname  "command param1 param2"  command2
+  allhosts hostname  "command param1 param2"  command2
+  allhosts command1 command2  # This uses current value of $ALLHOSTS
+  allhosts -group      # This just displays the current setting of the group
+  allhosts -group "hosta hostb hostc" "command param"  command
+  allhosts -groupfile areaA "command param"  command
+  allhosts -netgroup ngB "command param"  command
+  allhosts -dnsmatch regexp command1 "command2 p1 p2 p3"
+  allhosts id uptime 
+  allhosts -dnsmatch ..s "cp -p /etc/printers.conf $HOME/tmp/printers.conf._allhost_._date_"
+  allhosts -groupfile new.print.servers "cp a b; myscr; mailx matt"
+  allhosts singlequote exec  /bin/sh -c "ps -fp $$" singlequote
+  allhosts "-script myscript"
+  allhosts "-distrib mypath"
+IDEAS
+  o Force type of remsh - better use -script in this case
+  o Facility to PERSISTENTLY alter the range of hosts
+  o Flags to be quiet - rm the Host Header and status report.
+  o Extend the -distrib concept to call myrcp() ?
+SEE ALSO
+  o remote()
+  o .batch.defns
+';
+typeset allhosts_concurrent remotestatus;
+##set -x;
+	if [ -z "$*" ] ; then print "$USAGE"; return; fi
+
+	typeset allhosts_reset_ALLHOSTS="";
+	append_to_ALLHOSTS() {  # Yippie di do da.  A local, nested fn...
+		if [ -z "$allhosts_reset_ALLHOSTS" ] ; then 
+			print "allhosts():Resetting ALLHOSTS"; ALLHOSTS="";
+			allhosts_reset_ALLHOSTS="done";
+		fi
+		ALLHOSTS="$ALLHOSTS $@"; 
+	}
+
+	new_allhosts="";
+	while [ ! -z "$1" ] ; do
+	case $1 in
+		-group)    shift; 
+						   if [ -z "$1" ] ; then 
+						 	   ed_env ALLHOSTS; 
+						   else 
+								 append_to_ALLHOSTS "$1"; shift;
+						   fi;;
+    -groupfile)shift
+						   if [ -z "$1" ] ; then 
+							   print "$USAGE"; return; 
+						   else 
+								 typeset groupfile;
+								   if [ -f $1 ] ;              then groupfile=$1;
+								 elif [ -f $HOME/.group.$1 ] ; then groupfile=$HOME/.group.$1;
+								 else print "File Not Found $1"; return; fi;
+								 append_to_ALLHOSTS $(sed 's,#.*,,' $groupfile); shift;
+						   fi;;
+    -netgroup) shift; 
+						   if [ -z "$1" ] ; then 
+							   print "$USAGE"; return; 
+						   else 
+							   append_to_ALLHOSTS $(netgroup $1); shift;
+						   fi;;
+    -dnsmatch) shift;
+						   if [ -z "$1" ] ; then 
+							   print "$USAGE"; return; 
+						   else 
+							   append_to_ALLHOSTS $(nsm "$1" | awk "/$1/ {print \$1}"); 
+								 shift;
+						   fi;;
+    -ypmap)    shift;
+						   if [ -z "$1" ] ; then 
+							   print "$USAGE"; return; 
+						   else 
+							   append_to_ALLHOSTS $(ypcat -k  "$1"); 
+								 shift;
+						   fi;;
+		-resolve) shift;
+							 nsm $ALLHOSTS; # Must REPORT THE FAILURES as well
+							 ;;
+		-ping) shift;
+							ALLHOSTS_MISSED="";
+							 typeset -R25 ip; new_allhosts="";
+							 for ip in $ALLHOSTS; do
+								 print "Trying $ip:\c"; pingtest $ip ; 
+								 if [ $? -eq 0 ] ; then 
+									 new_allhosts="$new_allhosts $ip"; 
+								 else 
+									 ALLHOSTS_MISSED="$ALLHOSTS_MISSED $ip";
+								 fi
+							 done
+							 ALLHOSTS="$new_allhosts";
+							 ;;
+		-access) shift;
+							 typeset -R25 ip; new_allhosts="";
+							 for ip in $ALLHOSTS; do
+								 print "Trying $ip:\c"; 
+##								 visible=$(pingtest $ip ); 
+								 pingtest $ip >/dev/null 2>&1; 
+								 if [ $? -ne 0 ] ; then
+									 print "Can't access $ip";
+								 else
+									 remote  $ip 'echo $SHELL' >/dev/null 2>&1
+									 if [ $? -eq 0 ] ; then 
+										 new_allhosts="$new_allhosts $ip"; 
+										 print "OK";
+									 else
+										 print "no";
+									 fi
+								 fi
+							 done
+							 ALLHOSTS="$new_allhosts";
+							 ;;
+		-barme)    shift;
+							 ALLHOSTS=$(print $ALLHOSTS | split_stdin | grep -v "^`hostname`$" );
+							 ;;
+		-concurrently) shift; allhosts_concurrent="&";
+							 ;;
+
+		*)   # We've hit our first command.
+							 break;
+							 ;;
+	esac;
+	done;
+
+##set -x
+	for CMMD; do
+		if [ ! -z "$allhosts_concurrent" ]  ; then # Do them concurrently
+			( print "allhosts: Concurrent Execution:"; 
+				. $HOME/.batch.defns;  # Source definitions to facilitate batch
+
+				fn_list="";
+				for rhost in $ALLHOSTS; do 
+					if [ "$rhost" != "${rhost##*-}" ] ; then
+						print "allhosts: I don't like hostname $rhost";
+						continue;
+					fi
+					fn_list="$fn_list fn_${rhost}";
+					create_fn="
+fn_${rhost}() { 
+##	log=$HOME/tmp/batch.$rhost;
+##	echo Doing $rhost >>\$log;
+	remote $rhost \"$CMMD\";
+}";
+
+					##  print "$create_fn";  # Tracing
+					eval "$create_fn";   # This creates the fn() in this namespace
+				done
+				run_suit  $fn_list; # This is the (.batch.defns) fn to run all in bg with batch monitoring.
+			)
+		else
+			for rhost in $ALLHOSTS; do
+				print "### - Doing $(tput smso) $rhost $(tput rmso)  - ###"
+				remote $rhost "$CMMD";  remotestatus=$?; 
+			  if [ $remotestatus -eq 0 ] ; then new_allhosts="$new_allhosts $rhost"; fi
+			done
+		  ALLHOSTS="$new_allhosts";
+		fi
+	done;
+}
+
+
+remote() { #set -x;
+typeset USAGE='
+NAME
+  remote() - Execute a command or script on a 
+             remote host providing testing of connectivity,
+             determining type of remote shell, and providing exit status etc.
+             A background facility is provided which performs an "at" on the
+             remote host.
+SYNOPSIS
+  remote hostname      command
+  remote hostname "-bg command"
+  remote hostname "command param1 param2" cmmd2 cmmd3
+  remote hostname "cmmd1; cmmd2; cmmd3"
+  remote hostname   "-script scriptfile"
+  remote hostname   "-script scriptfile param1 param2"
+  remote hostname "-bgscript scriptfile"
+  remote hostname "-bgscript scriptfile param1 param2"
+  remote hostname   "-distrib apath"
+  remote hostname "-bgdistrib apath"
+  remote hostname "-rdist   apath"
+  remote "host1 host2" cmmd1 "cmmd2 p1 p2"
+CAVEAT
+  remote() uses rsh.  It will supply your command to the DEFAULT shell 
+  for your account on that remote host.  
+DESCRIPTION
+  remote() will execute the list of commands provided on the (list of) host(s)
+  given using rsh.
+
+  remote() detects the type of remote shell and uses appropriate measures to
+  determine and report the status.  For a common command over hosts of 
+  disparate default shells or architectures, its best to write a bourne 
+  shell script and use the "-script" option.   
+  -bg commands always use the /bin/sh syntax.
+
+  To execute many commands, two approaches are possible, either
+  1. Give separate entries on the cmmd-line.  
+     EG: remote hostname cmmd1 "cmmd2 param param" cmmd3
+     In this case a separate rsh will be used for each, or,
+  2. Give all the commands separated by ";" in ONE ENTRY.  
+     EG: remote hostname "cmmd1; cmmd2; cmmd3"
+     In this case the list is supplied to the ONE rsh, and ONE status is given.
+OPTIONS
+    "-script  ascript"   will copy ascript to /tmp on the remote host and execute it.
+  "-bgscript  ascript"   will copy ascript to /tmp on the remote host 
+                         and execute it as an atjob, returning the results via email
+    "-distrib apath"     will distribute the apath to the remote host.
+  "-bgdistrib apath"     will distribute the apath to the remote host.
+  "-bg command"          will execute the command in the background. 
+LEXICAL REPLACEMENTS
+  _remote_ as part of the command, gets changed to the named of the remotehost
+  _date_   as part of the command, gets changed to a date-time stamp 
+EXAMPLES
+  remote abighost "cp -p /etc/resolv.conf /etc/resolv.conf.SAVE"
+  remote abighost "-script /a/b/myscript param1 param2"
+  remote    ahost "-script /a/b/myscript param1 param2 >/tmp/remotefile._date_" 2>/tmp/localfile._remote_
+	remote "thishost thathost" id
+SEE ALSO
+  allhosts
+  .batch.defns
+IDEAS
+	o Also allow for a "nice" facility for background jobs......
+	o Also provide the 'time' facility so reports including timing info.
+  o Enhance -dist to a "cp -pr" and rdist, and checking alla myrcp
+    Perhaps have remote call myrcp .....
+  o Have a -bgdist
+  o Have a -rdist
+	o REMSH Better reporting of jobs etc.
+    Use some of the ideas in .batch.defns to use co-processors etc. to provide a 
+    better harnis for the execution of the remote job.  IE Error control
+    etc.  This though has to be in THIS ksh not the remote shell as you dont
+    know what type of shell that is.
+BUGS
+';
+
+	typeset RACCESS DATENOW rhost USE_SCRIPT USE_PARAMS CMMD CMMD_PRE CMMD_PRE_PROFORM CMMD_POST;
+	typeset RSH_SSH_DEFAULT="rsh";     # O/S dependent I guess
+	typeset RSH_SSH=$RSH_SSH_DEFAULT;  # Changes to "ssh" dependent on hostname below....
+	typeset RCP_SCP_DEFAULT="rcp";     # O/S dependent I guess
+	typeset RCP_SCP=$RCP_SCP_DEFAULT;  # Changes to "ssh" dependent on hostname below....
+	typeset RDIST_DEFAULT="/usr/sbin/rdist";
+	typeset RDIST="$RDIST_DEFAULT";
+
+	if [ -z "$1" ] ; then print "$USAGE"; return; fi
+
+	MY_MAIL_ADDRESS=${MY_MAIL_ADDRESS:-$(<$HOME/.forward)};
+
+	remotehosts="$1"; shift; 
+	for rhost in $remotehosts; do 
+	if [ "$rhost" != "${rhost##p02}" ] ; then 
+		RSH_SSH="ssh"; 
+		RCP_SCP="scp"; 
+		RDIST="/usr/sbin/rdist -P /usr/local/bin/ssh ";
+		print "remote(): Using ssh/scp for $rhost"; 
+	else
+		RSH_SSH=$RSH_SSH_DEFAULT; 
+		fi;
+	for CMMD; do 
+		CMMD_PRE=""; 
+		case $CMMD in 
+			-script*)
+				USE_SCRIPT="${CMMD##-script}"; # A script syntact is "-script thescript parm1 parm2"
+				if [ "$USE_SCRIPT" != "$CMMD" ] ; then # Got a script to use!
+					USE_PARAMS="${USE_SCRIPT#?* }";
+					if [ "$USE_PARAMS" != "$USE_SCRIPT" ] ; then  # Got some params
+						USE_SCRIPT="${USE_SCRIPT%$USE_PARAMS}";
+					else  # No params 
+						USE_PARAMS="";
+					fi
+					print "remote: Using script\t:: $USE_SCRIPT ";
+					print "remote: With  params\t:: $USE_PARAMS ";
+					REMOTE_USE_SCRIPT="/tmp/`basename $USE_SCRIPT`";
+					CMMD_PRE_PROFORM="$RCP_SCP -p $USE_SCRIPT _remote_:$REMOTE_USE_SCRIPT ";
+					CMMD="$REMOTE_USE_SCRIPT $USE_PARAMS";
+				fi
+			;;
+
+			-bgscript*)
+				USE_BGSCRIPT="${CMMD##-bgscript}"; #A bg script syntact is "-bgscript thescript parm1 ."
+				if [ "$USE_BGSCRIPT" != "$CMMD" ] ; then # Got a bg script to use!
+					USE_PARAMS="${USE_BGSCRIPT#?* }";
+					if [ "$USE_PARAMS" != "$USE_BGSCRIPT" ] ; then  # Got some params
+						USE_BGSCRIPT="${USE_BGSCRIPT%$USE_PARAMS}";
+					else  # No params 
+						USE_PARAMS="";
+					fi
+					print "remote: Using BackGround script\t:: $USE_BGSCRIPT ";
+					print "remote: With             params\t:: $USE_PARAMS ";
+					REMOTE_SCRIPT_BASENAME=$(basename $USE_BGSCRIPT);
+					REMOTE_USE_SCRIPT="/tmp/$REMOTE_SCRIPT_BASENAME";
+					REMOTE_USE_SCRIPT_ATJOB="/tmp/$REMOTE_SCRIPT_BASENAME.ATJOB";
+					AT_SH_JOB=$(cat <<!ATSHJOB
+	/bin/nice /bin/time $REMOTE_USE_SCRIPT $USE_PARAMS 2>&1 | 
+	mailx -s "remote() \`hostname\`: bgscript: $USE_BGSCRIPT $USE_PARAMS" $MY_MAIL_ADDRESS  
+!ATSHJOB
+						);
+					print "$AT_SH_JOB" > $REMOTE_USE_SCRIPT_ATJOB; 
+					chmod ugo+x          $REMOTE_USE_SCRIPT_ATJOB;
+					CMMD_PRE_PROFORM="$RCP_SCP -p $USE_BGSCRIPT _remote_:$REMOTE_USE_SCRIPT; $RCP_SCP -p $REMOTE_USE_SCRIPT_ATJOB _remote_:$REMOTE_USE_SCRIPT_ATJOB ";
+					CMMD="at -s -f $REMOTE_USE_SCRIPT_ATJOB now; sleep 1";
+				fi
+			;;
+
+		  -distrib*)
+				DO_DISTRIB="${CMMD##-distrib }";# A script syntact is "-script thescript parm1 parm2"
+				if [ "$DO_DISTRIB" != "$CMMD" ] ; then # Got distribution
+					DO_DISTRIB=${DO_DISTRIB## };
+					CMMD_PRE_PROFORM="$RCP_SCP -pr $DO_DISTRIB _remote_:$DO_DISTRIB ";
+					CMMD="/bin/ls -ld $DO_DISTRIB";
+				fi 
+			;;
+
+		  -bgdistrib*)
+				DO_BG_DISTRIB="${CMMD##-bgdistrib }";# A script syntact is "-bgdistrib path"
+				if [ "$DO_BG_DISTRIB" != "$CMMD" ] ; then # Got a bg distribution
+					DO_BG_DISTRIB=${DO_BG_DISTRIB## };
+					print "remote: Performing BackGround distribution\t:: $DO_BG_DISTRIB ";
+					CMMD_PRE_PROFORM="/bin/nice /bin/time $RCP_SCP -pr $DO_BG_DISTRIB _remote_:$DO_BG_DISTRIB & ";
+					CMMD="sleep 3; /bin/ls -ld $DO_BG_DISTRIB";
+				fi 
+			;;
+
+			-rdistBlat*) 
+				DO_RDIST="${CMMD##-rdistBlat }";
+				if [ "$DO_RDIST" != "$CMMD" ] ; then
+					DO_RDIST=${DO_RDIST## };
+					print "remote: Performing rdist \t:: $DO_RDIST ";
+					RDIST_FILE="$HOME/tmp/rdist.`basename $DO_RDIST`.$rhost";
+					RDIST_TEXT=$(cat <<!END_OF_RDIST
+	HOSTS=( $rhost )
+	FILES=( $DO_RDIST )
+	\${FILES} -> \${HOSTS}
+	install;
+!END_OF_RDIST
+);
+					print "$RDIST_TEXT" > $RDIST_FILE;
+					chmod ugo+r           $RDIST_FILE;
+					CMMD_PRE_PROFORM="$RDIST -q -f $RDIST_FILE ";
+					CMMD="/bin/ls -ld $DO_RDIST";
+				fi
+			;;
+
+			-rdist*)
+				DO_RDIST="${CMMD##-rdist }";
+				if [ "$DO_RDIST" != "$CMMD" ] ; then
+					DO_RDIST=${DO_RDIST## };
+					print "remote: Performing rdist \t:: $DO_RDIST ";
+					RDIST_FILE="$HOME/tmp/rdist.`basename $DO_RDIST`";
+					RDIST_TEXT=$(cat <<!END_OF_RDIST
+	HOSTS=( $rhost )
+	FILES=( $DO_RDIST )
+	\${FILES} -> \${HOSTS}
+	install;
+!END_OF_RDIST
+);
+					print "$RDIST_TEXT" > $RDIST_FILE;
+					chmod ugo+r           $RDIST_FILE;
+					CMMD_PRE_PROFORM=" $RDIST -y -q -f $RDIST_FILE ";
+					CMMD="/bin/ls -ld $DO_RDIST";
+				fi
+			;;
+
+		  -bg*)
+				DO_BG_CMMD="${CMMD##-bg }";     # A bg coomand syntact is "-bg cmmd parm1 parm2"
+				if [ "$DO_BG_CMMD" != "$CMMD" ] ; then # Got bg cmmd
+					DO_BG_CMMD=${DO_BG_CMMD## };
+
+					AT_SH_JOB=$(cat <<!ATSHJOB
+(  
+   mybgjob() {
+   	$DO_BG_CMMD
+   }
+   /bin/date '+Commencing at %D %T'
+   echo "  "
+   echo "Performing remote() -bg $DO_BG_CMMD"
+   echo "  "
+   mybgjob # $DO_BG_CMMD
+   RT="\$?";
+   echo "  "
+   /bin/date '+Completed  at %D %T with status $RT'
+) 2>&1 | mailx -s "remote() \`hostname\`: bg: $DO_BG_CMMD" $MY_MAIL_ADDRESS  
+
+
+!ATSHJOB
+);
+					REMOTE_CMMD_ATJOB="/tmp/remote.atjob.$$";
+					print "$AT_SH_JOB" > $REMOTE_CMMD_ATJOB; 
+					chmod ugo+x          $REMOTE_CMMD_ATJOB;
+					CMMD_PRE_PROFORM="$RCP_SCP -p $REMOTE_CMMD_ATJOB _remote_:$REMOTE_CMMD_ATJOB ";
+					CMMD="at -s -f $REMOTE_CMMD_ATJOB now; sleep 1";
+				fi 
+			;;
+
+			*) 
+			;;
+		esac;
+
+		if ! pingtest $rhost  >/dev/null ; then
+			print "remote: Can't ping $rhost" 1>&2;
+			continue;
+		fi
+		RACCESS=$($RSH_SSH  $rhost 'echo $SHELL' 2>&1)
+		if [ $? -ne 0 ] ; then
+			print "remote: $(tput smso)No access to other host $(tput rmso) $rhost (from $HOSTNAME) " 1>&2 ; 
+			continue;
+		fi
+		print "remote:$rhost: [ $RACCESS ] $CMMD";
+
+		DATENOW=`date '+%a%b%e-%H%M%S'`;
+		if [ ! -z "$CMMD_PRE_PROFORM" ] ; then
+			CMMD_PRE=$(print "$CMMD_PRE_PROFORM" | sed "s,_remote_,$rhost,g");
+			eval "$CMMD_PRE"; 
+		fi
+
+		case $RACCESS in
+			*/csh) 
+				CMMD_STRING=$(print "eval $CMMD;"'echo RemoteStatus ''$status'';' | sed "s,_rhost_,$rhost,g
+				s,_date_,$DATENOW,g");
+			;;
+			*/ksh|*/sh)  
+				CMMD_STRING=$(print  "eval $CMMD; "'RT=$?; echo RemoteStatus ''$RT'';' | sed "s,_rhost_,$rhost,g
+				s,_date_,$DATENOW,g"); 
+			;;
+			*)
+			;;
+		esac;
+##			TRACING=yes;
+		if [ ! -z "$TRACING" ] ; then
+			print "remote: $rhost [$RACCESS] \"$CMMD_STRING\" ";
+		fi
+		CAPTURE=$($RSH_SSH  $rhost "$CMMD_STRING" 2>&1 | sed "s,^,remote:$rhost:,g");
+		print "$CAPTURE";
+
+##			if [ ! -z "$CMMD_PRE" ] ; then
+##				print "allhosts: cleaning remote $USE_SCRIPT"; 
+##				$RSH_SSH  $rhost "/bin/rm /tmp/`basename $USE_SCRIPT`";
+##			fi
+##			return `print "$CAPTURE" | $AWK '{END {print $2}'
+	done; #All cmmds
+  done; #All remotehosts
+	return `print "$CAPTURE" | $AWK '/:RemoteStatus/ {printf "%d\n", $2}'`;
+}
+
+
+# Command-line parsing facilities
+##################################
+
+breakpoint() { #set -x
+	while read -r bpline?"breakpoint..\c " ; do
+		eval "$bpine";
+	done
+}
+unalias debugon 2>/dev/null;  alias debugon='trap breakpoint DEBUG'; 
+unalias debugoff 2>/dev/null; alias debugoff='trap DEBUG'; 
+
+split_args() {  #USEFUL within scripts, 
+	#What about using set -- see the book.
+	for SPT in "$@"; do print "" "$SPT"; done
+}
+
+split_stdin() {  #USEFUL on the cmmd-line
+	while read SPT_STDIN; do split_args $SPT_STDIN; done
+}
+
+myxarg() { #set -x
+#
+# NB:  fns like FF() are a lot better idea than re-executing the command over and over and over.
+#      Try *M*erging all the files into ONE env.var and then executing the cmmd.
+#
+# can be used as a general loop etc.
+# can supply it files, but could also supply any literals
+# Basic idea::  a_cmmd | myxargs -xarg_flags my_command -args_to_my_command;
+#               This will perform my_command on all the output of a_cmmd
+#    eg.>  find_which_hurts | myxargs sooth_them        # sooths all those hurt
+#    eg.>  find_which_hurts | myxargs -n sooth_them     # does nothing.
+#    eg.>  echo * | myxargs                             # print ONE LINE with all the filenames at the $PWD
+#    eg.>  echo * | myxargs -b                          # print ONE LINE PER FILENAME for files at the $PWD
+#    eg.>  echo * | myxargs -b ls -ld  
+#    eg.>  (echo b*; echo c*) | myxarg -m ls -ld        # merges all into ONE and then applies the cmmd.
+#    eg.>   
+# SEE ALSO     my fns all(), GNU xargs
+#
+#
+#
+
+#FLAGS
+typeset _XARG_DONT_PERFORM="";
+typeset _XARG_BREAKLINE="";
+typeset _XARG_MERGELINE="";
+
+#VALUES
+typeset _XARG_TRACE="";           # =="set -x; " when tracing 
+typeset _XARG_COMMAND="";
+
+	while [ ! -z "$1" ] ; do
+		case $1 in 
+			-n)    _XARG_DONT_PERFORM="1"; shift; print "myxarg():Not executing";;
+			-b)    _XARG_BREAKLINE="1";    shift; print "myxarg():Breaking Lines";;
+			-m)    _XARG_MERGELINE="1";    shift; print "myxarg():Merging  Lines";;
+			-h)    print "USAGE::  .... | myxarg {-nbm} command -args";
+						 print "       -n Don't Execute,   -b Break Lines,   -m Merge Lines";
+						 shift;;
+			-*)    print "myxarg: Unrecognised option :: $1"; return 12;;
+			*)     break;;
+		esac;
+	done;
+	while [ ! -z "$1" ] ; do
+		case $1 in 
+			*)     _XARG_COMMAND="$_XARG_COMMAND $1"; shift;;
+		esac;
+	done;
+
+
+_XARG_COMMAND="${_XARG_COMMAND:-print }";
+
+
+	xarg_breakln() {
+		if [ ! -z "$_XARG_BREAKLINE" ] ; then
+			split_args "$@"; 
+		else
+			print "$@"; 
+		fi
+	}
+
+	xarg_doit() { #set -x
+		if [ -z "$_XARG_DONT_PERFORM" ] ; then
+			eval "$_XARG_COMMAND $*";
+		else
+			print "myxarg() NOT performing $_XARG_COMMAND  on $*";
+		fi
+	}
+
+	while read LINE ; do           #perhaps break the line up here dependent on options...
+		#if  %F% is one of the args, replace it with the filename
+		#if  %1% is one of the args, replace it with the first word on the LINE
+		if [ ! -z "$_XARG_MERGELINE" ] ; then                 #DO IT ONCE PER BLOCK
+			_XARG_MERGED="$_XARG_MERGED $LINE";
+		else 
+			if [ ! -z "$_XARG_BREAKLINE" ] ; then
+				for pulse in $LINE; do xarg_doit $pulse; done     #DO IT ONCE PER WORD
+			else
+				 xarg_doit "$LINE";                               #DO IT ONCE PER LINE
+			fi
+		fi
+	done 
+	if [ ! -z "$_XARG_MERGELINE" ] ; then                 #DO IT ONCE PER BLOCK
+		 xarg_doit "$_XARG_MERGED";                         #DO IT ONCE PER BLOCK
+	fi;
+}
+
+
+#REGRESSION TEST SUIT
+#####################
+
+##(cd $HOME/tmp; echo b*; echo c*; echo d*)  | myxarg  $*
+##ls -d $HOME/tmp/*  | myxarg  
+
+##ls -d $HOME/tmp/*  | myxarg -n 
+##ls -d $HOME/tmp/*  | myxarg -freddy
+
+# An alternative to using xargs
+all() { #set -x  #Usage all cmmd file files files files
+	if [ -z "$1" ] ; then
+		print 'USAGE all "command" file {file ...}';
+	else
+		ALL_PROG="$1"; shift;
+		for each in $*; do $ALL_PROG $each; done;
+	fi;
+}
+
+show() {  # Display ONE PER LINE
+	show="$*";
+	typeset eachone;
+	typeset SHOWLINE="for eachone in \$show; do print \$eachone; done";
+	print "Doing - ";
+	print $SHOWLINE; print "";
+	eval "$SHOWLINE";
+}
+
+show_env() {  # Display the chosen envvars, q/ is there a ksh way to do this...
+	ENVVARS="$*"; 
+	for envvar in $ENVVARS; do
+		print "$envvar = \c"; eval "echo \$${envvar}"
+	done
+}	
+
+alias ee=ed_env;
+ed_env() { #set -x; # Edit An Env.Var. value  
+#
+# IDEA:  This   W A N T S   to be persistent....
+#
+#
+	TMPSCRIPT="/tmp/$$.ed_env.$$";
+	for envvar in $*; do
+		envvarref=$(echo \$${envvar});
+		envvarval=$(eval print \"${envvarref}\");
+		print "$envvar=\"$envvarval\";" >   $TMPSCRIPT;
+		${VISUAL:-${EDITOR:-vi}}            $TMPSCRIPT;
+		chmod +x                            $TMPSCRIPT;
+		'.'                                 $TMPSCRIPT;
+	done;
+	/bin/rm -f                            $TMPSCRIPT;
+}
+
+alias source_env=" source ";
+source() {  #set -x; typeset TRACING="set -x";
+typeset USAGE='
+NAME
+	source - (k)sh fn to source a csh file applying all the setenv values..
+SYNOPSIS
+	source csh-source-file
+DESCRIPTION
+  (k)sh fn that applies all the env.var. settings in a csh-style "source" file.
+	It deals with the syntax,  
+		setenv ENVVAR value
+		set    ENVVAR (val1 val2 val3)
+		set    ENVVAR = value
+	It does NOT process any of the conditionals!
+	It reports what the changes to the env.var. will be. and then 
+	provides (defines) the functions to set, reset, and report the values.
+BUGS
+	What about setenv DISPLAY `uname -n`:0
+	What about sourcing sourcing sourcing....
+	What about alias commands, ... probably DON''T want the option..
+  Need to also do the        set path=( fred alice john);
+  Need also to deal with     setenv FRED "A nice long string in quotes..."
+  Need better spacing of the VAR ie typset -R20
+';
+
+if [ -z "$1" ] ; then
+	print "$USAGE"; return;
+fi
+typeset SOURCE_FILE="$1"; # poss many files...??
+	set -o noglob;    #Once I read the contents of the file I DONT WANT GLOBBING
+
+# Q/ Hide this fn using typeset source_parser???
+	source_parser() { #set -x ;
+	# This will parse ONE LINE.  Use in loop.
+	# It's fn is to adds to the env.var.s SOURCE...
+		typeset -i           TN=$((0));   #TN is.....
+		typeset -R20 VAR_SPACED;
+		while [ ! -z "$1" ] ; do
+			TN=$((1 + $TN));
+			case $1 in 
+				setenv)     #print "GOT ONE :- $CSH_LINE";
+										shift;   VAR="$1"; VAR_SPACED=$VAR;
+										shift; NEW_VALUE="$@";
+										NEW_VALUE="${NEW_VALUE##*\(}";
+										NEW_VALUE="${NEW_VALUE%%;*}";
+										NEW_VALUE="${NEW_VALUE%%\)*}";
+										SEMANTIC="export $VAR=\"$NEW_VALUE\"";
+										SOURCE_VAR_SET="$SOURCE_VAR_SET
+$SEMANTIC"; 
+										SEMANTIC="print \"$VAR_SPACED is \$${VAR}\"";
+										SOURCE_VAR_REP="$SOURCE_VAR_REP
+$SEMANTIC";
+										CURRENT_VALUE=$(eval "print \$$VAR") 2>/dev/null;
+										SOURCE_VAR_RESET="$SOURCE_VAR_RESET
+export $VAR=\"$CURRENT_VALUE\"";
+				;;
+				set)        echo "cant do this yet";;
+				alias)      echo "cant do this yet";;
+			esac;
+			shift;
+		done
+	}
+
+	#Start Of Fn source()
+	SOURCE_VAR_SET=""; SOURCE_VAR_REP=""; SOURCE_VAR_RESET="";
+	cat $SOURCE_FILE | while read CSH_LINE; do source_parser $CSH_LINE; done;
+
+# Question WHY are these fns NOT aliases???
+	source_report() {  $TRACING; eval "$SOURCE_VAR_REP"; }    || print "ERROR: FAILED TO Define fn source_var_report()";
+	source_set()    {  $TRACING; eval "$SOURCE_VAR_SET"; }    || print "ERROR: FAILED TO Define fn source_var_set()";
+	source_reset()  {  $TRACING; eval "$SOURCE_VAR_RESET"; }  || print "ERROR: FAILED TO Define fn source_var_reset()";
+
+	print "\n-----PRIOR TO SOURCING ----"; source_report; #eval  "$SOURCE_VAR_REP";
+	print "\n-----NOW      SOURCING ----"; source_set;    #eval  "$SOURCE_VAR_SET";
+	print "\n-----POST     SOURCING ----"; source_report; #eval  "$SOURCE_VAR_REP";
+	print "\n";
+	print "To Report Your env.var.s use :-  source_report";
+	print "To Set    Your env.var.s use :-  source_set";
+	print "To Reset  Your env.var.s use :-  source_reset";
+}
+
+
+save() {  #use if not using rcs etc.
+	SAVE_DATE="`/usr/bin/date '+%a.%d.%b.%H_%M'`"
+	for each in $*
+	do
+		cp -p "$each" "$each.SAVE.$SAVE_DATE.$LOGNAME"
+	done
+}
+
+#brr() {
+	#FILES=`find . -print`
+	#TEXTS=`file $FILES | grep "$1 text" | cut -f1 -d:`
+	#NUM=echo $TEXTS | wc -w
+	#echo "TEXTS are $TEXTS"
+	##pg `$TEXTS `
+#}
+
+
+# NB: I'm using   =`cat   istead of =$(   because of problems with the tailing ')'. Don't know why...
+# NB: ''EndOfScript supposedly stops the expansion of env.var.s and \ and `
+DETAB_AWK=`cat <<''EndOfScript
+# Description:  A dumb little awk script to detab a file.
+#               It converts <TAB> chars to a number of spaces, so that
+#               the char after the tab is a multiple of TAB_STOP;
+#               TAB_STOP=3 has tab stops at 4, 7, prev+3  
+# Notes:        We do not provide a facility to have tab stops on non-boundaries
+# Ideas:        o Should get the tab stop position from somewhere, 
+#                 e.g and EnvVar, or the cmmd line argv[1]? etc.
+#               o Could be a C prog (It's really slow) but I'm hooked on AWK
+# See Also:     o /bin/expand, /bin/unexpand, /bin/tabs, 
+# 
+BEGIN { FS=""; TAB_STOP=2 }
+{ p=0;                    # p:char_posn (0, 1, 2) on the o/p line
+	len=length($0);
+	for (i=1; i<=len; i++) { # i:char_posn (1, 2, 3) on the i/p line 
+		char=substr($0, i, 1);
+		if (char != "\\t") {
+			printf("%s", char); p++
+		} 
+		else
+			do { printf(" "); p++ 
+			}  while ((p % TAB_STOP) !=0)
+		} 
+	printf("\\n")
+}
+EndOfScript
+`
+
+
+ENTAB_AWK=`cat <<''EndOfScript
+BEGIN { FS=""; TAB_STOP=2 }
+{ len=length($0); not_started=1;
+	for (i=1; i<=len / TAB_STOP; i++) { 
+		chars=substr($0, i * TAB_STOP, TAB_STOP); 
+		if (not_started && (chars = "  ")) {
+			printf("\\t")
+		}
+		else {
+			not_started=0; printf("%s", chars);
+		}
+	}
+	printf("\\n");
+}
+END { printf ("\n") }
+EndOfScript
+`
+
+
+
+
+
+mshexit() {
+#This gets used in my std ksh env. and gets aliased to 'exit' and 'x'
+typeset JOBS=`jobs|sed "s/ //g"`
+	if [ ! -z "$JOBS" ]
+	then
+		echo "There are stopped jobs."
+		jobs
+	else
+		#echo "bye"; "exit"
+		"exit"
+	fi
+}
+
+##sp() { #	set -x
+##	#See above for other methods, and what about 'set --'
+##	SPLIT_ME="$*";
+##	SP=`print $SPLIT_ME | awk '{split ($0, parts, $SPLIT_BY); for (part in parts) {print parts[part]}}'`;
+####	print $SP
+##	for each in $SP; do print $each; done
+##}
+
+lstoday() {    #set -x
+	#Ideas:: allow simillar fns to wh(), loop on each file, 
+	LSFLAGS=""; LSTODAY=""; NINE="9"; SHORT_DATE="`date '+%b %d'`"; 
+	while [ ! -z "$1" ] ; do
+		PARAM="$1"; RMDASH=${PARAM#-}
+		if [ "$PARAM" = "$RMDASH" ] ; then
+			SHORT_DATE="$PARAM";
+		else
+			LS_FLAGS="$LSFLAGS $PARAM"; 
+		fi
+		shift;
+	done
+	export LS_FILES=$(ls -la | awk  "/$SHORT_DATE/ {print \$${NINE}}")
+##	ls -d $LS_FLAGS $LS_FILES
+	for file in $LS_FILES; do
+		if [ "$file" = "."  -o  "$file" = ".." ] ; then
+			print "dotty" >/dev/null
+		else
+			ls -d $LS_FLAGS $file
+			LSTODAY="$LSTODAY $file"
+		fi
+	done
+}
+
+
+ktrace() {
+	#
+	# This IS PRETTY STUPID because it does NOT keep the interactive part of
+	# any shell
+	# It DOES (D I D) NOT even use PATH to find the $1 ....
+	# AGAIN - see the .batch script.....
+	# o we could merge OUT and ERR into the one file with the 
+	#   prefixes OUT: and ERR:
+	#
+	#
+	#
+	KERR_FILE=/tmp/TRACE.ERR.$PPID
+	KOUT_FILE=/tmp/TRACE.OUT.$PPID
+##	ksh -x $* >$KOUT_FILE 2>$KERR_FILE; 
+	(set -x; $*) >$KOUT_FILE 2>$KERR_FILE; 
+	pg $KOUT_FILE $KERR_FILE
+	/bin/rm -i /tmp/TRACE.*.$PPID
+}
+
+
+klog() {  #set -x
+	#
+	# How about using some of the technology in .batch.... for ERR stuff...
+	# ie. prepending each ERR line with ERR: and out with OUT:
+	#
+	#
+	KLOG_SEP="----------------------  ";
+	KLOG_CMMD="${1##*/}";
+	KLOG_FULL="$*";
+	KLOG_FILE="$HOME/log/$KLOG_CMMD.log";
+	print "\n${KLOG_SEP}Starting  '' $KLOG_FULL ''   at \t\c"   >> $KLOG_FILE
+	date '+%a %d %b %H:%M:%S'              >> $KLOG_FILE
+
+	eval "($KLOG_FULL)" 2>&1 | tee -a                $KLOG_FILE
+
+	print "\n${KLOG_SEP}Completed '' $KLOG_FULL ''   at \t\c"  >> $KLOG_FILE
+	date '+%a %d %b %H:%M:%S'              >> $KLOG_FILE
+}
+
+
+
+#
+#  GOAL - Have a ver. of /bin/tee that works on stderr instead of stdin
+#  PROB - all pipelines, have a single way in (STDIN), and a single way
+#         out (as far as pipelines are concerned).  STDERR isn't PIPEable.
+#  IDEA - Swap std-err and std-out in order to PIPE stdout(prev. stderr)
+#         to the tee cmmd.
+#  PROB - If we use the trick
+#             cmmd swap_err_and_out | tee FILE   
+#         WE MUST DO IT BEFORE the PIPEing is done, because as soon as the
+#         PIPEing is done, we loose one of the outbound files (OUT or ERR).
+#         (STDERR doesn't go THRU the PIPE)
+#
+#  SOLN -     (cmmd swap_err_and_out | tee FILE) swap_err_and_out_back_again
+#
+#         This works because,
+#          1. The STDOUT of cmmd, becomes STDERR, and therefore misses the "|"
+#             It then gets swapped back again to STDOUT, and leaves in the 
+#             usual manner as part of the pipeline;
+#          2. The STDERR of cmmd, becomes STDOUT, gets piped to the tee,
+#             and then gets swapped back again to STDERR before leaving the
+#             pipeline.  Therefore it could undergo, another redirecion if
+#             required.
+# LIMIT'- All of this must be one (INITIAL) process of a pipe line, 
+#         so that the STDOUT can be piped.
+# ( ;(  - This logic must be tightly bound to the command itself, and therefore
+#         can't be self-contained.  It must be a wrapper around a cmmd. 
+#          
+#          
+
+SWAPIO=" 3>&1 1>&2 2>&3 ";
+errtee() {
+##set -x
+	if [ -z "$1" -o ".$1." = ".-h." -o ".$1." = ".-?." -o ".$1." = ".h." ] ; then
+		print "usage eertee tee-parameter(s) command"
+		print "   eg eertee -a /tmp/MYERRORS ls -l /tmp/laksdjkjdkd /tmp"
+		print "   eg eertee -a /tmp/MYERRORS ls -l /tmp/laksdjkjdkd /tmp | more"
+		return
+	fi;
+
+	TEE_PARAMS="$1";
+	if [ "$TEE_PARAMS" = "-a" ] ; then
+		shift; TEE_PARAMS="$TEE_PARAMS $1";
+	fi
+	shift;
+
+	TEE_CMMD="$*";
+
+	eval "( $TEE_CMMD 3>&1 1>&2 2>&3 | tee $TEE_PARAMS  ) 4>&1 1>&2 2>&4" 
+}
+
+
+findmanpage() {
+##	set -x
+	set -o noglob; trap 'set +o noglob' EXIT;	 #We don't want to glob here....
+	typeset MANPATHLIST;    #locals
+	typeset FINDMANLIST;
+	typeset FIRSTTIME;
+
+	FINDMANLIST=""; FIRSTTIME="yes"; for manpage; do
+		if [ "$FIRSTTIME" = "yes" ] ; then
+			FINDMANLIST="$FINDMANLIST -name ${manpage}.*";    #no globbing thanks...
+		else
+			FINDMANLIST="$FINDMANLIST -o -name ${manpage}.*"; #no globbing thanks...
+		fi
+		FIRSTTIME="no"; 	
+	done
+	MANPATHLIST=$(print $MANPATH | sed 's/:/ /g');
+	print "findmanpage():Looking for manpages :- $*";
+
+		findmanpage=$(find $MANPATHLIST -follow  $FINDMANLIST  -print 2>/dev/null);
+		ls -L1o $findmanpage;
+
+	print "findmanpage():Completed looking for all manpages"
+	print "To print a manpage try 
+    groff -man -ps    \$findmanpage | lp    #if you have groff
+    troff -man -Tpost \$findmanpage | /usr/lib/lp/postscript/dpost | lp #solaris"
+}
+
+manprint() {  # Usage manprint 3 select
+##set -x
+	typeset MSECTION="$1"; shift; 
+	typeset MPAGES="$*";
+	typeset MPATHS=$(print $MANPATH 2>/dev/null | sed 's/:/ /g' 2>/dev/null)
+	for mp in $MPATHS; do
+		for manpage in $MPAGES; do
+			mp=$(unlinked.path $mp 2>/dev/null)
+			target="$mp/man${MSECTION}*/${manpage}.${MSECTION}*";
+			for hit in $target; do
+				if [ -f $hit ] ; then
+					print "Printing $hit"
+					groff  -ps -man $hit | lp
+				fi
+			done
+		done
+	done
+}
+
+mansubtree() { #set -x;
+	typeset USAGE='
+NAME
+  mansubtree path_to_man section section section
+EG:
+  mansubtree /usr/local/man man1 man1m manl';
+	typeset _mst_manbase="${1:-/usr/local/man}"; shift;
+	typeset _mst_oldcwd=$PWD;
+	cd "$_mst_manbase"; 
+	typeset _mst_sections=${*:-"man1 man1m manl"}; 
+	typeset _mst_allfiles=$(find $_mst_sections -type f -print)
+	typeset _mst_filename;
+	typeset _mst_allpages=$(for _mst_each in $_mst_allfiles; do 
+			_mst_filename=${_mst_each##*/}; 
+			print "${_mst_filename%%.*}"; 
+		done)
+
+	(MANPATH="$_mst_manbase:$MANPATH"; for _mst_each in $_mst_allpages; do man $_mst_each; done)
+	cd "$_mst_oldcwd=$PWD";
+}
+
+namedcat() { # set -x;
+	typeset nc; for nc ; do 
+		if [ -f "$nc" ] ; then 
+			print "\n ===> $nc"; 
+			/bin/cat $nc; 
+		else
+			print "\n ===!! No such filer:$nc";
+		fi; 
+	done 
+}
+
+podprint() {
+##	PODPRINT="$1";
+##	pod2man $PODPRINT  >/tmp/$PODPRINT.troff;
+##	groff  -ps -man     /tmp/$PODPRINT.troff | lp;
+	for each in $*; do 
+		pod2man $each  | groff -ps -man | lp; 
+	done
+	# this could be an alias...
+}
+
+persists() { # Peristently run a command, EVEN if it dies...
+	while [ 1 ] ; do
+		print "persists: Performing $*";
+		eval "$*";
+		print "persists: $1 TERMINATED.  Will restart in 5 seconds"
+		sleep 5; print "persists:Restarting";
+	done
+}
+
+restore_modes() { #set -x; 
+# Description:    Returns a string to restore the modes of the given file names given as $@
+# Usage:          restore_modes `find . -print` # However this has probs with filenames that contain spaces!!!
+#                 restore_modes *egg*
+#                 #Note if your filelist is too large, split it into a number of calls, eg.
+#                 (restore_modes [a-m]*; restore_modes [n-z]*)
+# Probs:          o Currently we use filenames supplied on the command-line, but what if they become too
+#                   numerous for the `ls` command... or argv?
+#                 o Problems dealing with fileaames that contain spaces, or other bad chars.
+#                 o There is a problem converting the mode '-' to the empty string. You
+#                   have to be careful NOT to do this in the filename part itself, ie. be careful with
+#                   filenames that contain an '-'. I separate the two streams for this reason.
+#                  
+#                 o I can't believe that unix doesn't have an executable program to do this, which,
+#                   of course, is how it aught to be done.
+#                 o
+#                 o
+# See Also:       $HOME/scripts/restore_modes.pl, restore_owner()
+# Techniques:     o Try to reduce number of calls of external progs s.a. ls, etc.
+#                 o There's a problem picking the filename out of a ls -lda listing, so
+#                   we put them into a separate file and merge using the read -u3 ....
+# Ideas:          Q. Perhaps this should read from std-in? but them we would probably have to 
+#                    do separate invocations of `ls`
+#                 Q. Perhaps using find if a -r flag is given! ie. Check 1st argument, 
+#                    and if a '-R', do a subtree using find.
+#                 Q. How about using paste to merge the two print streams, instead of using the 
+#                    two temporary files.
+# Lessons Learnt  ! Some things, really go beyound the capabilities of the shell, and aught to be                    
+#                   an executable program (or a perl script)
+#                    
+#                    
+#                    
+
+	if [ -z "$1" ] ; then return; fi; # Sometimes we call this with no params, 
+
+	typeset   tmpfil="/tmp/restore_modes";
+	typeset    tmprm="${tmpfil}.modes.$$";
+	typeset    tmpfl="${tmpfil}.files.$$";
+	typeset  _rmfile;
+
+	if [ "XX${1}" = "XX-R" ] ; then # -Recurse through the subdirs.....
+		shift; 
+		typeset _rm_subdirs=$(find "$@" -depth -type d -print);
+		if [ -z "$_rm_subdirs" ] ; then
+			print "echo No subdirs available to decend" 1>&2;
+		else
+##			for  subdir in $_rm_subdirs; do
+			print "$_rm_subdirs" | while read "subdir"; do
+				print "echo \"restore_modes: Using subdir // $subdir // \" " #1>&2;
+				restore_modes `ls -A $subdir | sed "s,^,$subdir/,"`;
+			done
+		fi
+	fi;
+
+	ls -lda "$@" | awk \
+			'{printf("chmod u=%s,g=%s,o=%s\n", substr($0,2,3), substr($0,5,3), substr($0,8,3) )}' | 
+			sed 's/-//g' | awk '{printf "%30-s\t\n", $0}' >$tmprm; 
+
+##  !!SETS!! For when the list of files is given as a *set*, that is as one $ENVVAR, 
+##  !!SETS!! that is multiline, with one line for each file.
+##  !!SETS!! NB: That when the $envvar is passed to this fn., it must be double quoted,
+##  !!SETS!!     eg. restore_modes "$myenvvarset"
+##  !!SETS!! 
+##	!!SETS!! print "$@" | while read _rmfile; do print "\"$_rmfile\"" >> $tmpfl; done;  !!SETS!! 
+##	!!SETS!! print "$@" | while read _rmfile; do print "\"$_rmfile\"" >> $tmpfl; done;  !!SETS!! 
+
+##	{ for _rmfile in "$@"; do print "\"$_rmfile\""; done; } >  $tmpfl;  
+##	print "$@" | sed 's,^,",' | sed 's,$,",' >  $tmpfl;  
+##	{ for _rmfile in $@; do print "\"$_rmfile\""; done; } >  $tmpfl;  
+##	print $@ | sed 's,^,",' | sed 's,$,",' >  $tmpfl;  
+##	{ for _rmfile; do print "\"$_rmfile\""; done; } >  $tmpfl;  
+
+	{ for _rmfile in $@; do print "\"$_rmfile\""; done; } >  $tmpfl;   # Non-sets ver. Breaks with filenames that contain spaces
+
+	paste   $tmprm $tmpfl;
+##  /bin/rm $tmprm $tmpfl;
+}
+
+restore_owner_and_modes_tree() {
+# eg. restore_modes_tree /usr -local
+
+
+	typeset RMT_NAWKSCRIPT=' 
+#34603    0 -rw-r-----  1 eeaharg  is              0 Jul  4 14:14 nsmail/dir with spaces/file1
+#1        2 3           4 5        6               7 8    9 10    11         12   13     14
+	  {  filenameposn=index($0, $11);
+			 filename=substr($0, filenameposn);
+			 printf "chown %s:%s\t \"%s\"\n", $5, $6, filename;
+
+			 modesposn=index($0, $3);
+			 modes=sprintf("u=%s,g=%s,o=%s",  
+				 substr($0, 1+modesposn, 3), 
+				 substr($0, 4+modesposn, 3), 
+				 substr($0, 7+modesposn, 3));
+			 printf "chmod %s\t \"%s\"\n", modes, filename;
+		} 
+	';
+
+	find $@ -ls | nawk "$RMT_NAWKSCRIPT";
+
+}
+
+
+restore_owner() { #set -x; 
+# Description:     Returns a string to restore the ownership of the given file names as $@
+# Ideas:           Q/. perhaps this should read from std-in?
+# Probs:           Currently we uses those on the command-line, but what if they become too
+#                  numerous for the `ls` command...?
+# Bugs:            o Not robust against SubDirs that contain spaces......
+# See Also:        $HOME/scripts/restore_modes.pl, restore_owner()
+
+	if [ -z "$1" ] ; then return; fi; # Sometimes we call this with no params, 
+
+##	print "restore_owner::files are:"; print "$@";print; print;
+
+	typeset   tmpfil="/tmp/restore_owners";
+	typeset    tmpro="${tmpfil}.owners.$$";
+	typeset    tmpfl="${tmpfil}.files.$$";
+	typeset filelist="$@";  
+	typeset  _rofile;
+
+	if [ "XX${1}" = "XX-R" ] ; then # -Recurse through the subdirs.....
+		shift; 
+		typeset _ro_subdirs=$(find "$@" -depth -type d -print);
+		if [ -z "$_ro_subdirs" ] ; then
+			print "echo No subdirs available to decend" 1>&2;
+		else
+			print "$_ro_subdirs" | while read "subdir"; do
+				print "echo \"restore_owner: Using subdir //  $subdir // \" " #1>&2;
+				restore_owner $(ls -A $subdir | sed "s,^,$subdir/,")
+##				feed_restore_owner=$(ls -A "$subdir" | sed "s,^,\"$subdir/,"| sed 's,$,",');
+##				restore_owner $feed_restore_owner;
+			done
+		fi
+	fi;
+
+	ls -lda "$@" | awk \
+			'{printf ("chown %s:%s \n", $3, $4  )}' |  awk '{printf "%30-s\t\n", $0}' >$tmpro;
+
+	{ for _rofile in "$@"; do print "\"$_rofile\""; done; } >  $tmpfl;  
+
+	paste   $tmpro $tmpfl;
+##  /bin/rm $tmpro $tmpfl;
+}
+
+
+  ####   #####
+ #    #  #    #
+ #       #    #
+ #       #    #
+ #    #  #    #
+  ####   #####
+
+############ These 3 cd related fns STOLEN From Richard Casey ###############
+############ They have NICE ksh eg.s and work well. Use the assoc. aliases ###############
+
+
+# CDHIST[] # CD History is implemented as a circular queue.
+typeset -i CD_HIST_SIZE=20;  # The size of the history (circular queue)
+typeset -i CD_TOP=0;         # The top    of this queue
+##typeset -i CD_BOT=0;         # The bottom of this queue
+CDHIST[0]="$HOME";           # Initial value is one element $HOME.
+
+export CD_HIST_SIZE  CD_TOP  CDHIST;
+
+unalias cd 2>/dev/null; alias cd=_cd
+_cd() {  # Keep a history of directories visited, and interactively provide selection.
+
+	_inc_CD_TOP() { 
+		((CD_TOP=CD_TOP+1)); 
+		# if ((CD_TOP > $CD_HIST_SIZE)); then
+		if [ CD_TOP -gt CD_HIST_SIZE ] ; then
+			((CD_TOP=0));  # wrap around back to 0::19,20,0,1,2
+		fi
+	}
+
+	_ins_CDHIST() {	#Insert $PWD into cd history, iff not already present. Called only by _cd
+		typeset -i i;
+
+		((i=0)); while ((i<${#CDHIST[*]})); do 		# Abort fn if dir is already in list
+			if [ "${CDHIST[$i]}" = "$PWD" ] ; then return; fi
+			((i=i+1))
+		done
+
+		_inc_CD_TOP; CDHIST[$CD_TOP]="$PWD";				# Insert new directory in list
+	}
+
+typeset USAGE='
+NAME
+	_cd()    - function to do a cd and provide additional convenience
+SYNOPSIS
+	_cd         cd to $HOME
+	_cd -       cd to     previous dir
+	_cd --      cd to 2 x previous dir
+	_cd -l      List cd history 
+	_cd -n      cd to the nth history item
+	_cd -regexp cd to history item matching regexp
+	_cd -help   Provide this usage info.
+';
+
+
+	typeset -i cdlen i;
+	typeset t;
+
+	if [ $# -eq 0 ] ; then set -- $HOME; fi  # Use $HOME if no params given, like 'cd';
+
+	if [ "${CDHIST[0]}" != "$PWD" -a "$PWD" != "" ] ; then
+		_ins_CDHIST				# insert $PWD into cd history
+	fi
+
+	cdlen=${#CDHIST[*]};			# number of elements in history
+
+	case "$@" in
+	-)					# cd to new dir
+		if [ "$OLDPWD" = "" ] && ((cdlen>1)) ; then
+			'print' "${CDHIST[1]}"
+			'cd'    "${CDHIST[1]}"
+			pwd
+		else
+			'cd' "$@"
+			pwd
+		fi
+		;;
+	-l)					# print directory list
+		typeset -R3 num;
+		((i=cdlen))
+		while (((i=i-1)>=0)); do
+			if [ ! -z "${CDHIST[i]}" ] ; then
+				num=$i; 'print' "$num ${CDHIST[i]}"
+			fi
+		done
+		return
+		;;
+	-[0-9]|-[0-9][0-9])			# cd to dir in list
+		if (((i=${1#-})<cdlen)); then
+			'print' "${CDHIST[i]}";
+			'cd'    "${CDHIST[i]}";
+			pwd
+		else
+			'cd' "$@"
+			pwd
+		fi
+		;;
+	-help) # Give Usage
+		print "$USAGE";
+	;;
+	-*)					# cd to matched dir in list
+		t=${1#-}
+		i=1
+		while ((i<cdlen))
+		do
+			case ${CDHIST[i]} in
+			*$t*)
+				'print' "${CDHIST[i]}";
+				'cd'    "${CDHIST[i]}";
+				pwd
+				break
+				;;
+			esac
+			((i=i+1))
+		done
+		if ((i>=cdlen)); then
+			'cd' "$@"
+			pwd
+		fi
+		;;
+	*)					# cd to new dir
+		'cd' "$@"; pwd
+		;;
+	esac
+
+	_ins_CDHIST;					# insert $PWD into cd history
+
+}
+
+# General alias-like utility cmmds
+##################################
+
+books() {  #set -x;  #Interface to ALL the 'book' progs (my litttttle DB)
+	_BOOKS_PWD="$PWD"; cd "$HOME/scripts";
+	/bin/ls -lFd * | awk '/-> book\*/ {print $9}';
+	cd "$_BOOKS_PWD";
+}
+
+
+#  sedit() and dorcs() are VERY interrelated!
+#
+#  Let's put a -rcs flag to sedit...., WHY ELSE
+#  would we use do_rcs()....?
+#
+# Another Idea - REFACTORING - REFORMATTING !
+#   o Let's extend the sedit idea to do refactoring across a group of file
+#     o Eg. 'C' development.  During test driven development, and traditional,
+#       there is often a need to refactor code.  It would be good to have support
+#       for this.  
+#       o Probably need a 'C' lang scanner - but they are available open source
+#       o Probably need integration with an editor - say vim. Wonder if anybody
+#         has done one already??
+#
+
+typeset -fx sedit; # Export it to any other shell that want's it, eg, rcs.vi
+sedit() {  #set -x; #   
+	typeset USAGE='NAME
+  sedit  - Apply a sed-script to (many) files
+SYNOPSIS
+  sedit {options} ["script"|-f script-file]  [targetfile]+	
+DESCRIPTION
+   A sed script is applied to one or more targetfiles, which 
+   are changed in place.  The script is either given on the 
+   command-line or supplied in a file.  Options effect whether
+   or not a backup of the target files is taken and whether
+   an alternative to sed is used to alter the files.
+OPTIONS
+    -nb        Dont produce a backup file.  These files
+    -nobackup  are persistent, and reside at $PWD.
+    -perl      Instead of sed, perl -w -i -p -e is used.
+    -exe       An executable program is supplied, ie. dont
+               use any interpreter at all
+		-filter    A filter is used to produce the o/p to replace
+							 the current contents of the file.
+    -sed       Sed is used which is the default.
+EXAMPLES
+  sedit -nb "s/p/dieing to/;s/q/mind them/"        mydocs/*
+  sedit -f my_sed_script              allfiles.* alice john
+  sedit -nb -perl -f my_perl_script                  *.html 
+  sedit     -perl    "s/police/Hello Hello Hello/;"  *.html 
+  sedit     -filter  "/bin/grep OnlyThese"            a b c 
+  sedit     -exe     my_special_prog                  d e f
+BUGS
+  Should hold backup files, if any, at dirname NOT $PWD.
+  Best solution for backup files, Surely is an RCS branch...
+HINTS
+SEE ALSO
+  do_rcs()  A fn to apply an action to a file which is 
+            held under RCS.
+';
+
+	typeset	SHORTDATE=$(date '+%a%d%b.%H.%M.%S');
+	typeset CLEANUP_ADVICE="sedit: Cleanup!: To remove the backup files, do
+\t/bin/rm sedit.prior.$SHORTDATE.*";
+	typeset sedit_prog_type="sed";     # defaults to a sed script...
+	typeset sedit_backup="yes";        # defaults to taking backups...
+	typeset sedit_use_scriptfile="no"; # defaults to using in-line scripts NOT files
+
+	if [ $# -eq 0 ] ; then print "$USAGE"; return; fi
+	while [ ! -z "$1" ] ; do 
+		case $1 in 
+			-nb|-nobackup) 	 typeset sedit_backup="no";   shift ;;
+			-sed|-perl|-exe|-filter)    
+			                 sedit_prog_type="${1#-}";    shift ;;
+			-f)              sedit_use_scriptfile="yes";  shift ;;
+			*)                                            break ;;
+		esac; 
+	done;
+
+	typeset seditscript="$1"; shift;
+	typeset seditfile sedittmpfile="/tmp/sedit.tmp.sedfile.$$";
+	for seditfile; do
+		if [ ! -f $seditfile ] ; then
+			print -u2 "sedit: Error:  NO File: \t$seditfile"; continue;
+		fi
+		if [ ! -w $seditfile ] ; then
+			print -u2 "sedit: Error:  Can't write: \t$seditfile"; continue;
+		fi
+
+		if [ "$sedit_backup" != "no" ] ; then
+			/bin/cp -p $seditfile sedit.prior.$SHORTDATE.${seditfile##*/}; 
+		fi
+
+		case $sedit_prog_type in 
+			sed) 
+				if [ "$sedit_use_scriptfile" = "yes" ] ; then
+					typeset EVAL_IT="sed  -f $seditscript    $seditfile > $sedittmpfile";
+				else
+					typeset EVAL_IT="sed  \"$seditscript\"   $seditfile > $sedittmpfile";
+				fi
+				typeset RESULTS=$(set +x; eval "$EVAL_IT" 2>&1);  # If 'set -x' this'll fail.....
+				if [ ! -z "$RESULTS" ] ; then
+					print -u2 "sedit: Alert:  sed failure: \t$seditfile: $RESULTS"; return
+				else
+					/bin/cp $sedittmpfile    $seditfile;
+					print "sedit: Notice: File Done: \t$seditfile";
+				fi
+			;;
+			perl)  # perl -w -p -i 
+				#   perl flags::   -w:give_Warning -p:Print_all_lines_input_loop -i:In-place editting
+				typeset SEDIT_PERL="/usr/local/bin/perl -w -p -i ";
+				if [ "$sedit_use_scriptfile" = "yes" ] ; then
+					typeset EVAL_IT="$SEDIT_PERL      $seditscript     $seditfile";
+				else
+					typeset EVAL_IT="$SEDIT_PERL -e \"$seditscript\"   $seditfile";
+				fi
+				typeset RESULTS=$(set +x; eval "set +x; $EVAL_IT" 2>&1); # NB: If 'set -x' then this'll fail......
+				if [ ! -z "$RESULTS" ] ; then
+					print -u2 "sedit: Alert: perl failure: \t$seditfile: $RESULTS"; return
+				else
+					print "sedit: Notice: File Done: \t$seditfile";
+				fi
+			;;
+			exe)
+				typeset EVAL_IT="$seditscript  $seditfile";   # How can we test for failure of the exe??.Surely $?
+				 # See ~/.batch.defns for a way to do it..........
+				typeset RESULTS=$(set +x; eval "$EVAL_IT 2>&1";  print $?);
+				typeset RETCODE=$(print "$RESULTS" | tail -1);
+				if [ ".$RETCODE" != ".0" ] ; then
+					print -u2 "sedit: Alert: exe failure: \t$seditfile: Return Code $RETCODE"; 
+					print -u2 "$RESULTS"; return
+				else
+					print "sedit: Notice: File Done: \t$seditfile";
+				fi
+			;;
+			filter)
+				typeset EVAL_IT="$seditscript  $seditfile > $sedittmpfile";
+				typeset RESULTS=$(set +x; eval "$EVAL_IT 2>&1";  print $?);
+				typeset RETCODE=$(print "$RESULTS" | tail -1);
+				if [ ".$RETCODE" != ".0" ] ; then
+					print -u2 "sedit: Alert: filter failure: \t$seditfile: Return Code $RETCODE"; 
+					print -u2 "$RESULTS"; return
+				else
+					/bin/cp $sedittmpfile    $seditfile;
+					print "sedit: Notice: File Done: \t$seditfile";
+				fi
+			;;
+			*)
+				print "sedit: Alert: Unknown program type. Aborting."; return
+			;;
+		esac;
+	done
+	if [ "$sedit_backup" != "no" ] ; then
+		print "$CLEANUP_ADVICE"; 
+	fi;
+	/bin/rm $sedittmpfile 2>/dev/null; 
+}
+
+#      It'd be nice to replace the silly rcs.vi.....
+#  Q/ What sort of things are we likely to want to do to a group of files
+#     that are stored within RCS?
+#  A/ Surely, ONLY alter them, ie. edit them.
+#     Q/ How shall we edit them?
+#     A/ Surely, ONLY via sed,  or perl, or a CUSTOM program of ours....
+#        !/ So we must keep these two little scripts seperate, so we can pass a 
+#           custom script to do_rcs.
+
+# DO_RCS: A NON-interactive script to apply a command to a list for 
+#         files held within RCS.  
+do_rcs() {  #set -x;
+	typeset USAGE="NAME
+  do_rcs   - Perform a NON-interactive command on an RCS'd 
+						 file, creating a new version.
+SYNOPSIS
+	do_rcs {-c rcs_comment} {-diff} command {file}+	
+DESCRIPTION
+	The 'command' is applied to each 'file' in turn,
+	checking out the file from RCS, prior to executing,
+	and checking in, subsequent to executing the command.
+OPTIONS
+	-c rcs_comment   This comment is used on checkin if supplied.
+EXAMPLES
+  do_rcs 	-c \"Just Had to do this....\"   \"sedit 's/p/gotta_go/'\"  t?
+SEE ALSO
+	sedit()   - non-interactively apply edit to list of files
+	rcs.vi    - script to interactively call /bin/vi, applying necessary RCS
+"; 
+
+	typeset rcs_comment="auto-generated by do_rcs";  # The default message
+	typeset rcs_do_diff="no";                        # Default's to NO diff.
+
+	if [ $# -eq 0 ] ; then print "$USAGE"; return; fi
+	while [ ! -z "$1" ] ; do 
+		case $1 in 
+			-c) 	        shift;  rcs_comment="$1";  shift;;
+			-diff)                rcs_do_diff="yes"; shift;;
+			*)                                       break;;
+		esac; 
+	done;
+	typeset do_rcs_command="$1"; shift;
+
+
+	# perhaps here we should do a typeset -xf $EDITOR; #....
+	for rcs_file; do
+		print "do_rcs:$do_rcs_command \t $rcs_file";
+		co -q -l $rcs_file;
+		eval "$do_rcs_command $rcs_file"; # NB: $do_rcs_command may be multi-token
+		if [ "$rcs_do_diff" = "yes" ] ; then
+			rcsdiff -q $rcs_file;
+		fi
+		ci -q -m"$rcs_comment" -u $rcs_file;
+	done
+	print "do_rcs:Complete";
+}
+
+
+tarExtractAndSave() {  # Extracts the supplied tar file, keeping a previous copy of any 
+                       # of the files, in another tar file...
+	typeset NEWFILELIST DATE;
+	for NewTarFile; do
+		NEWFILELIST=$(tar -tf $NewTarFile);
+		if [ -z "$NEWFILELIST" ] ; then
+			print "$0: Abort: No Files In Archive ACCESSABLE: "; return 1
+		fi
+		DATE=$(date  '+%a%d%b.%H.%M.%S');
+		TAREXTRACTANDSAVE="fileBeforeTarExtact_$DATE_$NewTarFile";
+		tar -cvf $TAREXTRACTANDSAVE  $NEWFILELIST
+		print "Previous Versions are In Archive:$TAREXTRACTANDSAVE  ";
+		print "Now, If Archive OK, Go Ahead with the extraction - By...";
+		print "tar -xvf $NewTarFile";
+	done
+}
+
+mysu() {
+	typeset suto=${1:-root};
+	if [ -f /bin/ksh ] ; then
+		/bin/su - $suto -c "/bin/ksh -i";
+	else
+		/bin/su - $suto
+	fi
+}
+alias susu=mysu;
+
+lines() { # print out specific lines of a file
+# Eg. lines fred.txt 23 44 130 12 5 
+# ToDo: store nums in an array, and for each line test for inclusion
+#       in array and then print.  Why? in case ksh line gets too long!
+# ToDo: Allow selection of a range of lines using 34-40 or 24..40
+##	set -x;
+	typeset DOLLAR='$';
+	typeset file=$1; shift;
+	typeset numb lt gt; 
+	typeset select="0";
+	for numb; do
+			gt=${numb##*..}; lt=${numb%%..*};
+			if [ "$lt" != "$numb" ] ; then
+				select="$select || ($lt<=NR && NR <=$gt)";
+			else
+				select="$select || NR==$numb";
+			fi;
+	done
+	typeset nawkscript=$(cat <<EOS
+		 ($select) {printf "%6d: %s\n",  NR, ${DOLLAR}0; } 
+EOS
+);
+	nawk "$nawkscript" $file;
+}
+
+prePendBaseDir() {
+# Filter to prepend a basedir to a list of files on a pipe;
+	typeset prePendBaseDir="$1";
+	if [ -z "$prePendBaseDir" ] ; then
+		return;
+	fi;
+	cat  | sed -e "s,^./,/," -e "s,^,$prePendBaseDir,"
+}
+
+
+FilesFromList() { #set -x;
+typeset USAGE='
+NAME
+  FilesFromList()    - get a list of matching files from a file containing a list.
+SYNOPSIS
+  FilesFromList [ -fl listfile ] [ -bd basedir ] [ -cmmd cmmd ] [pattern]+
+EG
+  FilesFromList  -fl allfiles.txt  -bd /proj/b     -cmmd less    teddy.h
+DESCRIPTION
+  grep for each occurance of each supplied pattern from the supplied listfile
+  and return the list in $FilesFromList, and apply the supplied command 
+  to each occurance.
+  The listfile and basedir are cached between calls.
+SEE ALSO
+';	
+	typeset ME="FilesFromList";
+	typeset CMMD="";
+	while [ ! -z "$1" ] ; do
+		case "$1" in
+			-fl)   shift; FileListFile="$1";         shift;;
+			-bd)   shift; FilesFromListBasedir="$1"; shift;;
+			-cmmd) shift; CMMD="$1";                 shift;;
+			*)     break;;
+		esac;
+	done
+
+	if [ -z "$FileListFile" ] ; then
+		print "$ME: Error: No FileListFile set";
+		print "$USAGE";
+		return 2;
+	fi
+	if [ -z "$1" ] ; then print "$USAGE"; fi;
+
+	print "$ME: Using FileListFile $FileListFile";
+	print "$ME: Using Basedir      $FilesFromListBasedir";
+	print "$ME: Using Command      $CMMD";
+	print "";
+
+	for grepPattern; do
+		print "$ME: Grepping for $grepPattern";
+		typeset FilesRelative=$(grep $grepPattern $FileListFile);
+		typeset FilesPrePended=$(print "$FilesRelative" | prePendBaseDir $FilesFromListBasedir);
+		if [ -z "$FilesFromListBasedir" ] ; then
+			                             ls -ld $FilesRelative ####| sed "s,^,$ME,"; 
+		else
+			print "$FilesPrePended";
+			atpath $FilesFromListBasedir ls -ld $FilesRelative ####| sed "s,^,$ME,"; 
+		fi
+
+		FilesFromList="$FilesFromList $FilesPrePended"; # for further viewing...
+		if [ ! -z "$CMMD" ] ; then
+			sleep 4; eval $CMMD $FilesPrePended;
+		fi
+	done
+}
+
+dusk() {
+##	set -x;
+	typeset dusk_path="${1:-$PWD}"; 
+	typeset dusk_name=${dusk_path##*/};
+	atpath $dusk_path 'du -sk *' | sort -n > /tmp/dusk.$dusk_name; 
+	cat                                    /tmp/dusk.$dusk_name;
+
+}
+
+
+findfilesmatching() {
+##	set -x;
+	typeset paths="$1"; shift;
+	typeset cmmd="find $paths -name "'*'"$1"'*'" -print "; shift;
+	for partname; do
+		cmmd="$cmmd -o -name "'*'"$partname"'*'" -print ";
+	done
+	print "$cmmd"; 
+	eval "$cmmd";
+}
+
+finddirsmatching() {
+##	set -x;
+	typeset paths="$1"; shift;
+	typeset cmmd="find $paths -type d -name "'*'"$1"'*'" -print "; shift;
+	for partname; do
+		cmmd="$cmmd -o -type d -name "'*'"$partname"'*'" -print ";
+	done
+	print "$cmmd"; 
+	eval "$cmmd";
+}
+
+environ() {
+	USAGE='\
+NAME
+	environ  [ -save | -restore | -diff | -cat | -edit] name
+	environ  [ -edit | -ls ]
+SYNOPSIS
+	-saves    the current environment variables and        identifies them as name
+	-restores the         environment variables            identified      as name
+	-diff     the current environment variables with those identified      as name
+	-cat      the         environment variables            identified      as name
+	-edit     the         environment variables            identified      as name
+	-edit     the current environment variables 
+';
+	if [ -z "$2"  -a "$1" != "-edit" ] ; then print "$USAGE"; return; fi
+##	if [ -n "$2" ] then  print "$USAGE"; return; fi; 
+	case "$1" in
+		-save) env | sort > ~/.environ/$2;;
+		-restore) print "Restoring $2"; '.' ~/.environ/$2;;
+		-diff) env | sort > /tmp/environ.$$; diff /tmp/environ.$$ ~/.environ/$2;;
+		-cat)  cat ~/.environ/$2;;
+		-edit) if [ -z "$2" ] ; then
+						 env     > /tmp/environ.$$;
+						 $EDITOR   /tmp/environ.$$;
+						 '.'       /tmp/environ.$$;
+					 else
+						 $EDITOR   ~/.environ/$2;
+					 fi;;
+	  -ls)   (cd "~/.environ"; ls);;
+		*)     print "$USAGE";
+	esac;
+}
+
+##print "Done"; else print "Done already"; fi;

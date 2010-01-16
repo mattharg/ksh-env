@@ -1,0 +1,16 @@
+Q10.	What is the difference between [...] and [[...]]?
+A10.	The [[...]] is processed as part of the shell grammar
+			whereas [...] is processed like any other command.
+			Operators and operands are detected when the command is
+			read, not after expansions are performed.  The shell does not
+			do word splitting or pathname generation inside  [[...]].
+			This allows patterns to be specified for string matching
+			purposes.
+
+Q11.	How come [[ $foo == $bar ]] is true and [[ $bar == $foo ]] is false?
+A11.	The == operator is not symmetrical.  It takes a string on the left
+			and a pattern on the right.  However, if you double quote the right
+			hand side, which removes the special meaning of pattern match
+			characters, then this becomes a string comparison so that
+			[[ "$foo" == "bar" ]] and [[ "$bar" == "$foo" ]] are equivalent.
+

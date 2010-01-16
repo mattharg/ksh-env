@@ -1,0 +1,84 @@
+# File           ~/.kshrc.fns.fnprog
+# TASK: how to use (k)sh to allow functional programming
+#       ie. x(fred(john))     # infix notation
+#           x fred john       # ? notation
+#           car cdr john alf allice
+# As an exercise, simple lispkit-list fns, car, cdr, etc.
+#
+# FUNCTIONS
+#     car
+#     cdr
+#     quote
+#
+#
+# Return Codes
+##############
+FAILED_TO_CDR="2";
+
+# TEXT MACROS : NB eval to execute them...
+#############
+#
+# ksh Macro:           eval_params
+#   macros facilitate the bulk copying of text - no params though.... :( 
+# Usage:               eval "$eval_params";
+# Description:         Include the above in your fn()
+#                      It causes the evaluation of the fn parameters ("$@")
+#                      and then reset's your param's
+# Eg.:                 If your parameters are cat fred, 
+#                      then file fred whould be cat'd
+# ToDo:                a script, an internal command, ?quoting, 
+#                      
+#                      
+eval_params='
+##	set -x;
+	typeset IT="$1";
+	typeset WHAT=$(type $IT 2>/dev/null);
+	typeset WH=${WHAT##${IT} is }
+	case $WH in 
+		"a function") 
+				typeset DELAYED=$(eval "$@");
+				set -- $DELAYED
+	esac;
+#END_OF_MACRO_eval_params
+';
+
+car() { #set -x; # return the first item of the list (of params)
+  eval "$eval_params"; 
+
+	#Now do it
+	print "$1";
+}
+
+cdr() { #set -x; # return all but the first item of the list (of params)
+  eval "$eval_params"; 
+
+	#Now do it
+	if [ $# -ne 0 ]  ; then
+		shift; 
+		print "$*";
+	else
+		print "UNDEFINED"  # do I want to do this??
+		return $FAILED_TO_CDR
+	fi
+}
+
+
+# Regression Teset
+show_and_eval() {
+	typeset PARAMS="$@";
+	print "\n $PARAMS --> \t \c"; eval $PARAMS;
+}
+if [ -z "$REGRESSION_TEST" ] ; then
+
+	show_and_eval         cdr john alice fred;
+	show_and_eval         car john alice fred;
+	show_and_eval     car cdr john alice fred;
+	show_and_eval     car car john alice fred;
+	show_and_eval     cdr cdr john alice fred;
+	show_and_eval cdr cdr cdr john alice fred;
+	show_and_eval cdr cdr cdr bang;
+	show_and_eval car;
+	show_and_eval car car;
+	show_and_eval car car singleton;
+
+fi;

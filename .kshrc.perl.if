@@ -1,0 +1,113 @@
+# File:          $HOME/.kshrc.perl.if
+# Description:   ksh interactive shell fns to provide interactive i/f to perl
+# Usage:         This file has to be sourced ('.' included) and then use the fns..
+#                 
+# See Also       $HOME/.kshrc.*
+#
+# Ideas:         the 'eval' of perl
+# Bugs           o 
+#                o need pretty printer cmmdline -> file...
+#                o how about good sed/awk/perl so that cmmd goes to line in a neat way
+#                  o NL -> \n
+#                  o ^J -> NL
+#                 ACTUALLY storing in the file with TRUE formatting is better
+#                o when in the 'vi' of pe 
+#                  o need to be able suspend and execute if desired, and
+#                  o have the file elegent on the screen (in the file) q/ pretty print.
+#                o Need to have a (perl?) script, ran from vi:! that takes the file
+#                  within vi (%) 
+#                  passes them to the perl (or eval)
+#                   o vi calls ksh and then the cmmd which can be an alias
+#                     how about setting SHELL prior to vi the file.....
+#                o have a little help on this i/f
+#                o how about setting FCEDIT to a fn that solves some problems
+##set -x 
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+
+KP_PC="perl -we"                       # perl interactive command invocation.
+KP_CACHE="$HOME/.ksh.perl.cache"       # location of cache of perl cmmd lines
+
+typeset -Z6 INC
+KP_INC="$KP_CACHE/.increment.file"     # 'increment' file for peristence of inc num.
+
+get_next_KP_INC() {
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+	OLD="`cat $KP_INC`"       2>/dev/null
+	let INC="1 + $OLD"        2>/dev/null
+	if [ "$INC" = "99999" ] ; then let INC="0"; fi
+	print "$INC" >$KP_INC
+}
+
+push_kp_cmmd() {
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+	get_next_KP_INC; 
+	NEXT_CMMD="$KP_CACHE/p.cmmdline.$INC.pl"
+	print $KP_LINE > $NEXT_CMMD;
+}
+
+pop_kp_cmmd() {
+	KP_LINE=`cat $KP_INC`
+}
+
+# p(): main perl interpreter loop - perl evals its params
+p_func() {
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+	KP_LINE="$*"            # gotta NOT have any ksh expansion of the p params, so 
+	if [ "$KP_TRACE" = "yes" ] ; then print "evaluating >>>> $KP_LINE <<<<" ; fi
+	push_kp_cmmd;
+	unset x; if [ "$KP_TRACE" = "yes" ] ; then set -x ; fi
+	eval "$KP_PC '$KP_LINE'"       # ksh MUST supply the whole line to the $PC command
+												    # eval is the way to go here...
+	unset x; unset KP_TRACE
+}
+
+p_edit() {   # vi last line and run it  - allow param to select the history item
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+	LAST_CMMD="$KP_CACHE/p.cmmdline.`cat $KP_INC`.pl"       2>/dev/null
+	get_next_KP_INC; 
+	NEXT_CMMD="$KP_CACHE/p.cmmdline.$INC.pl"
+	if [ -z "$1" ] ; then 
+		cp $LAST_CMMD  $NEXT_CMMD; chmod +x $NEXT_CMMD 
+	else
+		typeset -Z6  SEL_BRANCH="$1";
+		NEW_CMMD="$KP_CACHE/p.cmmdline.${SEL_BRANCH}.pl"       2>/dev/null
+		cp $NEW_CMMD  $NEXT_CMMD; chmod +x $NEXT_CMMD
+	fi
+##	ksh -p -c "(SHELL='/usr/local/bin/perl -w $NEXT_CMMD'; ${EDITOR:-/bin/vi} $NEXT_CMMD)"
+	ksh -p -c "(${EDITOR:-/bin/vi} $NEXT_CMMD)"
+	KP_LINE=`cat $NEXT_CMMD`
+	if [ "$KP_TRACE" = "yes" ] ; then print "evaluating >>>> $KP_LINE <<<<" ; fi
+	eval "$KP_PC '$KP_LINE'"
+}
+
+p_eval_cmmd_file() {
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+	eval "perl -w  $LAST_CMMD" #just started on this.....
+}
+
+p_history() {   #Give the history of cache'd perl cmmdlines
+if [ ! -z "$TRACING" ] ; then set -x ; fi
+##	if [ "$1" = "-s" ] ; then 
+##		shift; KP_HIST=${1:-20};
+##	fi
+	if [ "$1" = "-l" ] ; then 
+		shift; KP_HIST=${1:-20}; shift
+	fi
+	(cd $KP_CACHE;
+	KP_LIST=`ls p.cmmd* | tail -$KP_HIST`
+	for plfl in  $KP_LIST ; do 
+		KP_HNUM=${plfl##*line.%%.pl}
+		print "$KP_HNUM : \c"; cat $plfl
+	done;
+	)
+}
+
+# Access the function using one of these aliases
+################################################
+alias p="p_func"                              # perl
+alias pt="KP_TRACE="yes"; p_func"             # perl and trace
+alias pe="p_edit";                            # edit and run the last kshperlcmmdline
+alias pet="KP_TRACE="yes"; p_edit"            # perl and trace and run
+alias pte=pet
+alias p!="p_history"
+

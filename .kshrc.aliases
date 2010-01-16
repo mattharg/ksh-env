@@ -1,0 +1,115 @@
+# File:          $HOME/.kshrc.aliases
+# Description:   Aliases for *LOGIN* shells *ONLY*
+#                Called (q?) ONCE ONLY by .kshrc
+#
+# N O T E:       If the alias has a space (' ') at the end then other aliases will be
+#                processed on the command-line.  This seems to be what I would want
+#                by default.
+#
+#
+
+###############################
+# A L I A S S E S
+###############################
+
+##if [ -z "$KSHRC_ALIASES_COLLECTED" ] ; then
+##export KSHRC_ALIASES_COLLECTED="true"
+alias ppp="PATH=/bin:/usr/bin; pathlist_select default";
+alias lart="ls -lart";
+alias dfkl='df -kl | grep dev';
+alias fp='PATH=$FORIEGN_PATH; ed_path -non-interactive; clear; sp';
+alias DU="du -sk * | sort -n | awk '{print; tot+=\$1; } END {print tot}' | $PAGER";
+alias xcc="xclearcase -fn 10x20 -bg darkviolet  -fg yellow ";
+alias fns="typeset -f";
+alias FNS="typeset +f";
+alias foxac1="echo foxac1; telnet"
+alias nsl="nslookup ";
+alias sane=" stty sane; stty erase ^H werase ^w kill ^u intr ^c echoe; ";
+alias s='stty sane; stty erase ^H werase ^w kill ^u intr ^c echoe;';
+
+alias h="history"
+alias rmhist='OLD_HISTFILE=$HISTFILE; HISTFILE=/dev/null; > $OLD_HISTFILE; HISTFILE=$OLD_HISTFILE;'
+
+alias   hfind='strings ~/.hist/hist*   | grep -i ';
+alias  cdfind='strings ~/.hist/cdhist* | grep -i ';
+alias pclfind='strings ~/.hist/pcl*    | grep -i ';
+
+##alias vi="$HOME/scripts/sccs.vi"
+if [ -z "$CLEARCASE_ROOT" ] ; then
+	alias vi="rcs.vi"
+fi
+alias a="(alias; typeset +f | sed 's,$,(),') | grep  "
+alias x="exit"
+alias exit="mshexit"
+alias xx="chmod u+x "
+alias lock="/usr/bin/lock -9999999999"
+alias la="/usr/bin/lock -9999999999"
+alias f="find . -print | less"
+## as a fn now alias ff='(FILES=`find . -print`; ls -ld  $FILES | ${FF_CMMD:-less})'
+alias l="ls -F "
+alias ll="ls -lF "
+alias lll="ls -lFad "
+##alias dirs="ls -lFa | grep '/$'" # now a fn
+alias 0="clear ";
+alias z="clear ";
+alias j="jobs -l "
+alias pss="($HOME/scripts/ps.cost.tree </dev/null | ${PAGER:-less})"  # WHY the subshell here?
+#alias .="fg" # we DONT use '.' anylonger - its to important a ksh facility...
+##alias ,="fg ; clear"
+alias ,="fg "
+alias ,-="fg %- ; clear " #Fails under solaris... NOT under AIX
+alias ,-="fg %- "
+#
+# Here there is the opportunity for a load of simillar ,s ,g etc. aliases -> fns
+#
+#
+alias 1="fg %1"
+alias 2="fg %2"
+alias 3="fg %3"
+alias 4="fg %4"
+alias 5="fg %5"
+alias 6="fg %6"
+alias 7="fg %7"
+alias 8="fg %8"
+alias 9="fg %9"
+alias 10="fg %10"
+alias 11="fg %11"
+alias 12="fg %12"
+alias 13="fg %13"
+alias 14="fg %14"
+alias 15="fg %15"
+alias 16="fg %16"
+alias 17="fg %17"
+alias 18="fg %18"
+alias 19="fg %19"
+alias 20="fg %20"
+alias 21="fg %21"
+alias e=" export "
+##alias wpclean="rm /var/tmp/excmsg"
+alias la="lock -900000"
+alias br='pg `file * | grep text | cut -f1 -d:`'
+alias brr='pg `file * | grep text | cut -f1 -d:`'
+#DONE AS FUNC#alias brr='pg `find . -print | grep text | cut -f1 -d:`'
+
+##alias hp="export TERM=hp"
+##alias vt220="export TERM=vt220"
+alias vt100="export TERM=vt100"
+##alias ibm3151="export TERM=ibm3151"
+
+# SPECIAL ALAIS PROCESSING - I forget wht the _ does...
+alias _X='ifor each in *; do print $each; done' ## MAYBIE AN ALIAS FOR THIS...
+
+##alias man="rsh george man -M/usr/share/man:/usr/local/share/man | less"
+alias ml="ls -ld $MAIL "
+alias pg="less "
+alias more="less "
+alias l48="export LINES=48"
+
+if [ -e /usr/local/share/vim/vim61 ] ; then export VIMRUNTIME=/usr/local/share/vim/vim61; fi;
+alias vless="$VIMRUNTIME/macros/less.sh";
+
+##print "Done";
+##else
+##print "Done already";
+##fi; # if -z $KSHRC....
+
