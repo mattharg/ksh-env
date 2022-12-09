@@ -24,7 +24,7 @@ Shell Configuration
   * .kshrc.arch.solaris - Solaris configuration.
   * .kshrc.dev          - Software development configuration. 
   * .kshrc.c_dev        - Configure for C software development. 
-  * .kshrc.fns          - General purpose shell functions - this sources additional starting with .kshrc.fns...
+  * .kshrc.fns          - General purpose shell functions - this sources additional files named .kshrc.fns...
   * .kshrc.fns.ps       - Shell functions to assist with process management.
   * .kshrc.fns.paths    - Shell functions to assist with working with paths. 
   * .kshrc.fnprog       - Functional programming facilities.
