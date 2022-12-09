@@ -7,7 +7,7 @@ unix/linux systems I administered at that time.
 
 You get hooked on your shell environment, so I still use them in 2022, though now mainly in as zsh/Macs, or bash/Linux. 
 There is very little difference, from a scripting viewpoint, between the main interactive shells, viz. sh, bash, ksh, zsh.  
-I try to accomodate those differences to they work under all these shells.
+I try to accomodate those differences so they work under all these shells.
 
 Calling Order
 -------------
