@@ -17,10 +17,10 @@ This file sources all the remaining files.
 
 Shell Configuration 
 -------------------
-.kshrc.PS1          - Configures the $PS1 variable for the command line prompt.
+  * .kshrc.PS1          - Configures the $PS1 variable for the command line prompt.
 
-.kshrc.PATH         - Functions to help manage paths, PATH, MANPATH and others.
+  * .kshrc.PATH         - Functions to help manage paths, PATH, MANPATH and others.
 
-.kshrc.architecture - Determine the host OS and make some configurations dependent on differences between OS'.
+  * .kshrc.architecture - Determine the host OS and make some configurations dependent on differences between OS'.
 
 
