@@ -18,9 +18,22 @@ This file sources all the remaining files.
 Shell Configuration 
 -------------------
   * .kshrc.PS1          - Configures the $PS1 variable for the command line prompt.
-
+  * .kshrc.aliases      - Just command-line aliases
   * .kshrc.PATH         - Functions to help manage paths, PATH, MANPATH and others.
-
   * .kshrc.architecture - Determine the host OS and make some configurations dependent on differences between OS'.
-
+  * .kshrc.arch.solaris - Solaris configuration.
+  * .kshrc.dev          - Software development configuration. 
+  * .kshrc.c_dev        - Configure for C software development. 
+  * .kshrc.fns          - General purpose shell functions - this sources additional starting with .kshrc.fns...
+  * .kshrc.fns.ps       - Shell functions to assist with process management.
+  * .kshrc.fns.paths    - Shell functions to assist with working with paths. 
+  * .kshrc.fnprog       - Functional programming facilities.
+  * .kshrc.fns.sets     - Shell functions to implement sets of strings.  These are sometimes useful when working at the command line.
+  * .kshrc.site...      - Site-specific configurations.  This keeps configurations specific to a site/workplace out of the other files.
+  * .kshrc.networking   - Networking specific functions.
+ 
+ Job and Batch Management
+ ------------------------
+   * .batch.defns       - To be 'source'd to collect functions helpful when running batch at the command-line - i.e. not within cron or a batch management system.  This uses the job control facilities of the shell to manage and report on the background tasks.  Even has some demos and unit testing.  Got carried away. 
+   * 
 
